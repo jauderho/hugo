@@ -78,10 +78,6 @@ func LoadConfig(d ConfigSourceDescriptor, doWithConfig ...func(cfg config.Provid
 		}
 	}
 
-	if err := l.applyConfigDefaults(); err != nil {
-		return l.cfg, configFiles, err
-	}
-
 	if d.AbsConfigDir != "" {
 		dcfg, dirnames, err := config.LoadConfigFromDir(l.Fs, d.AbsConfigDir, l.Environment)
 		if err == nil {
@@ -95,6 +91,10 @@ func LoadConfig(d ConfigSourceDescriptor, doWithConfig ...func(cfg config.Provid
 			}
 			return nil, nil, err
 		}
+	}
+
+	if err := l.applyConfigDefaults(); err != nil {
+		return l.cfg, configFiles, err
 	}
 
 	l.cfg.SetDefaultMergeStrategy()
@@ -255,9 +255,9 @@ func (l configLoader) applyConfigDefaults() error {
 		"relativeURLs":                         false,
 		"removePathAccents":                    false,
 		"titleCaseStyle":                       "AP",
-		"taxonomies":                           map[string]string{"tag": "tags", "category": "categories"},
-		"permalinks":                           make(map[string]string),
-		"sitemap":                              config.Sitemap{Priority: -1, Filename: "sitemap.xml"},
+		"taxonomies":                           maps.Params{"tag": "tags", "category": "categories"},
+		"permalinks":                           maps.Params{},
+		"sitemap":                              maps.Params{"priority": -1, "filename": "sitemap.xml"},
 		"disableLiveReload":                    false,
 		"pluralizeListTitles":                  true,
 		"forceSyncStatic":                      false,

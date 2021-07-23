@@ -28,6 +28,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gohugoio/hugo/resources/images/webp"
+
 	"github.com/gohugoio/hugo/common/paths"
 
 	"github.com/spf13/afero"
@@ -362,7 +364,7 @@ func TestImageResize8BitPNG(t *testing.T) {
 	resized, err := image.Resize("800x")
 	c.Assert(err, qt.IsNil)
 	c.Assert(resized.MediaType().Type(), qt.Equals, "image/png")
-	c.Assert(resized.RelPermalink(), qt.Equals, "/a/gohugoio_hu0e1b9e4a4be4d6f86c7b37b9ccce3fbc_73886_800x0_resize_linear_2.png")
+	c.Assert(resized.RelPermalink(), qt.Equals, "/a/gohugoio_hu0e1b9e4a4be4d6f86c7b37b9ccce3fbc_73886_800x0_resize_linear_3.png")
 	c.Assert(resized.Width(), qt.Equals, 800)
 }
 
@@ -379,7 +381,7 @@ func TestImageResizeInSubPath(t *testing.T) {
 	resized, err := image.Resize("101x101")
 	c.Assert(err, qt.IsNil)
 	c.Assert(resized.MediaType().Type(), qt.Equals, "image/png")
-	c.Assert(resized.RelPermalink(), qt.Equals, "/a/sub/gohugoio2_hu0e1b9e4a4be4d6f86c7b37b9ccce3fbc_73886_101x101_resize_linear_2.png")
+	c.Assert(resized.RelPermalink(), qt.Equals, "/a/sub/gohugoio2_hu0e1b9e4a4be4d6f86c7b37b9ccce3fbc_73886_101x101_resize_linear_3.png")
 	c.Assert(resized.Width(), qt.Equals, 101)
 	c.Assert(resized.Exif(), qt.IsNil)
 
@@ -395,7 +397,7 @@ func TestImageResizeInSubPath(t *testing.T) {
 
 	resizedAgain, err := image.Resize("101x101")
 	c.Assert(err, qt.IsNil)
-	c.Assert(resizedAgain.RelPermalink(), qt.Equals, "/a/sub/gohugoio2_hu0e1b9e4a4be4d6f86c7b37b9ccce3fbc_73886_101x101_resize_linear_2.png")
+	c.Assert(resizedAgain.RelPermalink(), qt.Equals, "/a/sub/gohugoio2_hu0e1b9e4a4be4d6f86c7b37b9ccce3fbc_73886_101x101_resize_linear_3.png")
 	c.Assert(resizedAgain.Width(), qt.Equals, 101)
 	assertImageFile(c, image.(specProvider).getSpec().BaseFs.PublishFs, publishedImageFilename, 101, 101)
 }
@@ -550,6 +552,47 @@ func goldenEqual(img1, img2 *image.NRGBA) bool {
 	return true
 }
 
+// Issue #8729
+func TestImageOperationsGoldenWebp(t *testing.T) {
+	if !webp.Supports() {
+		t.Skip("skip webp test")
+	}
+	c := qt.New(t)
+	c.Parallel()
+
+	devMode := false
+
+	testImages := []string{"fuzzy-cirlcle.png"}
+
+	spec, workDir := newTestResourceOsFs(c)
+	defer func() {
+		if !devMode {
+			os.Remove(workDir)
+		}
+	}()
+
+	if devMode {
+		fmt.Println(workDir)
+	}
+
+	for _, imageName := range testImages {
+		image := fetchImageForSpec(spec, c, imageName)
+		imageWebp, err := image.Resize("200x webp")
+		c.Assert(err, qt.IsNil)
+		c.Assert(imageWebp.Width(), qt.Equals, 200)
+	}
+
+	if devMode {
+		return
+	}
+
+	dir1 := filepath.Join(workDir, "resources/_gen/images")
+	dir2 := filepath.FromSlash("testdata/golden_webp")
+
+	assetGoldenDirs(c, dir1, dir2)
+
+}
+
 func TestImageOperationsGolden(t *testing.T) {
 	c := qt.New(t)
 	c.Parallel()
@@ -658,6 +701,12 @@ func TestImageOperationsGolden(t *testing.T) {
 	dir1 := filepath.Join(workDir, "resources/_gen/images")
 	dir2 := filepath.FromSlash("testdata/golden")
 
+	assetGoldenDirs(c, dir1, dir2)
+
+}
+
+func assetGoldenDirs(c *qt.C, dir1, dir2 string) {
+
 	// The two dirs above should now be the same.
 	dirinfos1, err := ioutil.ReadDir(dir1)
 	c.Assert(err, qt.IsNil)
@@ -692,7 +741,7 @@ func TestImageOperationsGolden(t *testing.T) {
 				"gohugoio8_hu7f72c00afdf7634587afaa5eff2a25b2_73538_300x200_fill_gaussian_smart1_2.png":
 				c.Log("expectedly differs from golden due to dithering:", fi1.Name())
 			default:
-				t.Errorf("resulting image differs from golden: %s", fi1.Name())
+				c.Errorf("resulting image differs from golden: %s", fi1.Name())
 			}
 		}
 
