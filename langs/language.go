@@ -17,7 +17,10 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
+	translators "github.com/bep/gotranslators"
+	"github.com/go-playground/locales"
 	"github.com/gohugoio/hugo/common/maps"
 	"github.com/gohugoio/hugo/config"
 )
@@ -68,6 +71,14 @@ type Language struct {
 	params    map[string]interface{}
 	paramsMu  sync.Mutex
 	paramsSet bool
+
+	// Used for date formatting etc. We don't want these exported to the
+	// templates.
+	// TODO(bep) do the same for some of the others.
+	translator locales.Translator
+
+	locationInit sync.Once
+	location     *time.Location
 }
 
 func (l *Language) String() string {
@@ -86,8 +97,22 @@ func NewLanguage(lang string, cfg config.Provider) *Language {
 
 	localCfg := config.New()
 	compositeConfig := config.NewCompositeConfig(cfg, localCfg)
+	translator := translators.GetTranslator(lang)
+	if translator == nil {
+		translator = translators.GetTranslator(cfg.GetString("defaultContentLanguage"))
+		if translator == nil {
+			translator = translators.GetTranslator("en")
+		}
+	}
 
-	l := &Language{Lang: lang, ContentDir: cfg.GetString("contentDir"), Cfg: cfg, LocalCfg: localCfg, Provider: compositeConfig, params: params}
+	l := &Language{
+		Lang:       lang,
+		ContentDir: cfg.GetString("contentDir"),
+		Cfg:        cfg, LocalCfg: localCfg,
+		Provider:   compositeConfig,
+		params:     params,
+		translator: translator,
+	}
 	return l
 }
 
@@ -221,4 +246,27 @@ func (l *Language) IsSet(key string) bool {
 		return l.Provider.IsSet(key)
 	}
 	return l.Cfg.IsSet(key)
+}
+
+func (l *Language) getLocation() *time.Location {
+	l.locationInit.Do(func() {
+		location, err := time.LoadLocation(l.GetString("timeZone"))
+		if err != nil {
+			location = time.UTC
+		}
+		l.location = location
+	})
+
+	return l.location
+}
+
+// Internal access to unexported Language fields.
+// This construct is to prevent them from leaking to the templates.
+
+func GetTranslator(l *Language) locales.Translator {
+	return l.translator
+}
+
+func GetLocation(l *Language) *time.Location {
+	return l.getLocation()
 }
