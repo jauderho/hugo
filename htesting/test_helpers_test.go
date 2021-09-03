@@ -1,4 +1,4 @@
-// Copyright 2018 The Hugo Authors. All rights reserved.
+// Copyright 2021 The Hugo Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,12 +11,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package hugo
+package htesting
 
-// CurrentVersion represents the current build version.
-// This should be the only one.
-var CurrentVersion = Version{
-	Number:     0.89,
-	PatchLevel: 0,
-	Suffix:     "-DEV",
+import (
+	"testing"
+
+	qt "github.com/frankban/quicktest"
+)
+
+func TestExtractMinorVersionFromGoTag(t *testing.T) {
+
+	c := qt.New(t)
+
+	c.Assert(extractMinorVersionFromGoTag("go1.17"), qt.Equals, 17)
+	c.Assert(extractMinorVersionFromGoTag("go1.16.7"), qt.Equals, 16)
+	c.Assert(extractMinorVersionFromGoTag("go1.17beta1"), qt.Equals, 17)
+	c.Assert(extractMinorVersionFromGoTag("asdfadf"), qt.Equals, -1)
+
 }
