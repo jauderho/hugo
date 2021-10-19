@@ -4,8 +4,7 @@ require (
 	github.com/BurntSushi/locker v0.0.0-20171006230638-a6e239ea1c69
 	github.com/PuerkitoBio/purell v1.1.1
 	github.com/PuerkitoBio/urlesc v0.0.0-20170810143723-de5bf2ad4578 // indirect
-	github.com/alecthomas/chroma v0.9.2
-	github.com/alecthomas/repr v0.0.0-20181024024818-d37bc2a10ba1 // indirect
+	github.com/alecthomas/chroma v0.9.4
 	github.com/armon/go-radix v1.0.0
 	github.com/aws/aws-sdk-go v1.40.8
 	github.com/bep/debounce v1.2.0
@@ -17,11 +16,11 @@ require (
 	github.com/cli/safeexec v1.0.0
 	github.com/disintegration/gift v1.2.1
 	github.com/dustin/go-humanize v1.0.0
-	github.com/evanw/esbuild v0.12.29
+	github.com/evanw/esbuild v0.13.8
 	github.com/fortytw2/leaktest v1.3.0
 	github.com/frankban/quicktest v1.13.1
-	github.com/fsnotify/fsnotify v1.4.9
-	github.com/getkin/kin-openapi v0.78.0
+	github.com/fsnotify/fsnotify v1.5.1
+	github.com/getkin/kin-openapi v0.79.0
 	github.com/ghodss/yaml v1.0.0
 	github.com/gobuffalo/flect v0.2.3
 	github.com/gobwas/glob v0.2.3
@@ -56,7 +55,7 @@ require (
 	github.com/spf13/jwalterweatherman v1.1.0
 	github.com/spf13/pflag v1.0.5
 	github.com/spf13/viper v1.8.1
-	github.com/tdewolff/minify/v2 v2.9.21
+	github.com/tdewolff/minify/v2 v2.9.22
 	github.com/yuin/goldmark v1.4.1
 	github.com/yuin/goldmark-highlighting v0.0.0-20200307114337-60d527fdb691
 	gocloud.dev v0.20.0

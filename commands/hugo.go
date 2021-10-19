@@ -30,6 +30,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gohugoio/hugo/hugofs/files"
+
 	"github.com/gohugoio/hugo/common/types"
 
 	"github.com/gohugoio/hugo/hugofs"
@@ -278,7 +280,8 @@ func isTerminal() bool {
 	return terminal.IsTerminal(os.Stdout)
 }
 
-func (c *commandeer) fullBuild() error {
+func (c *commandeer) fullBuild(noBuildLock bool) error {
+
 	var (
 		g         errgroup.Group
 		langCount map[string]uint64
@@ -303,7 +306,7 @@ func (c *commandeer) fullBuild() error {
 		return nil
 	}
 	buildSitesFunc := func() error {
-		if err := c.buildSites(); err != nil {
+		if err := c.buildSites(noBuildLock); err != nil {
 			return errors.Wrap(err, "Error building site")
 		}
 		return nil
@@ -496,7 +499,7 @@ func (c *commandeer) build() error {
 		}
 	}()
 
-	if err := c.fullBuild(); err != nil {
+	if err := c.fullBuild(false); err != nil {
 		return err
 	}
 
@@ -551,7 +554,7 @@ func (c *commandeer) serverBuild() error {
 		}
 	}()
 
-	if err := c.fullBuild(); err != nil {
+	if err := c.fullBuild(false); err != nil {
 		return err
 	}
 
@@ -721,8 +724,8 @@ func (c *commandeer) getDirList() ([]string, error) {
 	return filenames, nil
 }
 
-func (c *commandeer) buildSites() (err error) {
-	return c.hugo().Build(hugolib.BuildCfg{})
+func (c *commandeer) buildSites(noBuildLock bool) (err error) {
+	return c.hugo().Build(hugolib.BuildCfg{NoBuildLock: noBuildLock})
 }
 
 func (c *commandeer) handleBuildErr(err error, msg string) {
@@ -750,7 +753,7 @@ func (c *commandeer) rebuildSites(events []fsnotify.Event) error {
 			visited[home] = true
 		}
 	}
-	return c.hugo().Build(hugolib.BuildCfg{RecentlyVisited: visited, ErrRecovery: c.wasError}, events...)
+	return c.hugo().Build(hugolib.BuildCfg{NoBuildLock: true, RecentlyVisited: visited, ErrRecovery: c.wasError}, events...)
 }
 
 func (c *commandeer) partialReRender(urls ...string) error {
@@ -762,7 +765,7 @@ func (c *commandeer) partialReRender(urls ...string) error {
 	for _, url := range urls {
 		visited[url] = true
 	}
-	return c.hugo().Build(hugolib.BuildCfg{RecentlyVisited: visited, PartialReRender: true, ErrRecovery: c.wasError})
+	return c.hugo().Build(hugolib.BuildCfg{NoBuildLock: true, RecentlyVisited: visited, PartialReRender: true, ErrRecovery: c.wasError})
 }
 
 func (c *commandeer) fullRebuild(changeType string) {
@@ -809,7 +812,7 @@ func (c *commandeer) fullRebuild(changeType string) {
 				return
 			}
 
-			err = c.buildSites()
+			err = c.buildSites(true)
 			if err != nil {
 				c.logger.Errorln(err)
 			} else if !c.h.buildWatch && !c.Cfg.GetBool("disableLiveReload") {
@@ -864,13 +867,19 @@ func (c *commandeer) newWatcher(pollIntervalStr string, dirList ...string) (*wat
 		for {
 			select {
 			case evs := <-watcher.Events:
+				unlock, err := c.hugo().BaseFs.LockBuild()
+				if err != nil {
+					c.logger.Errorln("Failed to acquire a build lock: %s", err)
+					return
+				}
 				c.handleEvents(watcher, staticSyncer, evs, configSet)
 				if c.showErrorInBrowser && c.errCount() > 0 {
 					// Need to reload browser to show the error
 					livereload.ForceRefresh()
 				}
+				unlock()
 			case err := <-watcher.Errors():
-				if err != nil {
+				if err != nil && !os.IsNotExist(err) {
 					c.logger.Errorln("Error while watching:", err)
 				}
 			}
@@ -1193,12 +1202,16 @@ func partitionDynamicEvents(sourceFs *filesystems.SourceFilesystems, events []fs
 func pickOneWriteOrCreatePath(events []fsnotify.Event) string {
 	name := ""
 
-	// Some editors (for example notepad.exe on Windows) triggers a change
-	// both for directory and file. So we pick the longest path, which should
-	// be the file itself.
 	for _, ev := range events {
-		if (ev.Op&fsnotify.Write == fsnotify.Write || ev.Op&fsnotify.Create == fsnotify.Create) && len(ev.Name) > len(name) {
-			name = ev.Name
+		if ev.Op&fsnotify.Write == fsnotify.Write || ev.Op&fsnotify.Create == fsnotify.Create {
+			if files.IsIndexContentFile(ev.Name) {
+				return ev.Name
+			}
+
+			if files.IsContentFile(ev.Name) {
+				name = ev.Name
+			}
+
 		}
 	}
 
