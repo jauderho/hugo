@@ -91,6 +91,10 @@ func NewContent(h *hugolib.HugoSites, kind, targetPath string) error {
 		return errors.Errorf("failed to resolve %q to a archetype template", targetPath)
 	}
 
+	if !files.IsContentFile(b.targetPath) {
+		return errors.Errorf("target path  %q is not a kown content format", b.targetPath)
+	}
+
 	return b.buildFile()
 
 }
@@ -137,8 +141,9 @@ func (b *contentBuilder) buildDir() error {
 	if !b.dirMap.siteUsed {
 		// We don't need to build everything.
 		contentInclusionFilter = glob.NewFilenameFilterForInclusionFunc(func(filename string) bool {
+			filename = strings.TrimPrefix(filename, string(os.PathSeparator))
 			for _, cn := range contentTargetFilenames {
-				if strings.HasPrefix(cn, filename) {
+				if strings.Contains(cn, filename) {
 					return true
 				}
 			}
@@ -205,7 +210,8 @@ func (b *contentBuilder) buildFile() error {
 	if !usesSite {
 		// We don't need to build everything.
 		contentInclusionFilter = glob.NewFilenameFilterForInclusionFunc(func(filename string) bool {
-			return strings.HasPrefix(contentPlaceholderAbsFilename, filename)
+			filename = strings.TrimPrefix(filename, string(os.PathSeparator))
+			return strings.Contains(contentPlaceholderAbsFilename, filename)
 		})
 	}
 
