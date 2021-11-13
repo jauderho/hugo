@@ -35,7 +35,7 @@ import (
 )
 
 // TODO(bep) clean this up. Export the test site builder in Hugolib or something.
-func TestNewContent(t *testing.T) {
+func TestNewContentFromFile(t *testing.T) {
 	cases := []struct {
 		name     string
 		kind     string
@@ -50,6 +50,8 @@ func TestNewContent(t *testing.T) {
 		{"No archetype", "", "sample-3.md", []string{`title: "Sample 3"`}},                        // no archetype
 		{"Empty archetype", "product", "product/sample-4.md", []string{`title = "SAMPLE-4"`}},     // empty archetype front matter
 		{"Filenames", "filenames", "content/mypage/index.md", []string{"title = \"INDEX\"\n+++\n\n\nContentBaseName: mypage"}},
+		{"Branch Name", "name", "content/tags/tag-a/_index.md", []string{"+++\ntitle = 'Tag A'\n+++"}},
+
 		{"Lang 1", "lang", "post/lang-1.md", []string{`Site Lang: en|Name: Lang 1|i18n: Hugo Rocks!`}},
 		{"Lang 2", "lang", "post/lang-2.en.md", []string{`Site Lang: en|Name: Lang 2|i18n: Hugo Rocks!`}},
 		{"Lang nn file", "lang", "content/post/lang-3.nn.md", []string{`Site Lang: nn|Name: Lang 3|i18n: Hugo Rokkar!`}},
@@ -165,7 +167,9 @@ func TestNewContentFromDirSiteFunction(t *testing.T) {
 	c := qt.New(t)
 
 	archetypeDir := filepath.Join("archetypes", "my-bundle")
+	defaultArchetypeDir := filepath.Join("archetypes", "default")
 	c.Assert(mm.MkdirAll(archetypeDir, 0o755), qt.IsNil)
+	c.Assert(mm.MkdirAll(defaultArchetypeDir, 0o755), qt.IsNil)
 
 	contentFile := `
 File: %s
@@ -174,6 +178,7 @@ site RegularPages: {{ len site.RegularPages  }}
 `
 
 	c.Assert(afero.WriteFile(mm, filepath.Join(archetypeDir, "index.md"), []byte(fmt.Sprintf(contentFile, "index.md")), 0o755), qt.IsNil)
+	c.Assert(afero.WriteFile(mm, filepath.Join(defaultArchetypeDir, "index.md"), []byte("default archetype index.md"), 0o755), qt.IsNil)
 
 	c.Assert(initFs(mm), qt.IsNil)
 	cfg, fs := newTestCfg(c, mm)
@@ -183,8 +188,20 @@ site RegularPages: {{ len site.RegularPages  }}
 	c.Assert(len(h.Sites), qt.Equals, 2)
 
 	c.Assert(create.NewContent(h, "my-bundle", "post/my-post"), qt.IsNil)
-
 	cContains(c, readFileFromFs(t, fs.Source, filepath.Join("content", "post/my-post/index.md")), `site RegularPages: 10`)
+
+	// Default bundle archetype
+	c.Assert(create.NewContent(h, "", "post/my-post2"), qt.IsNil)
+	cContains(c, readFileFromFs(t, fs.Source, filepath.Join("content", "post/my-post2/index.md")), `default archetype index.md`)
+
+	// Regular file with bundle kind.
+	c.Assert(create.NewContent(h, "my-bundle", "post/foo.md"), qt.IsNil)
+	cContains(c, readFileFromFs(t, fs.Source, filepath.Join("content", "post/foo.md")), `draft: true`)
+
+	// Regular files should fall back to the default archetype (we have no regular file archetype).
+	c.Assert(create.NewContent(h, "my-bundle", "mypage.md"), qt.IsNil)
+	cContains(c, readFileFromFs(t, fs.Source, filepath.Join("content", "mypage.md")), `draft: true`)
+
 }
 
 func TestNewContentFromDirNoSite(t *testing.T) {
@@ -273,6 +290,12 @@ title: Test
 		{
 			path:    filepath.Join("archetypes", "post.org"),
 			content: "#+title: {{ .BaseFileName  | upper }}",
+		},
+		{
+			path: filepath.Join("archetypes", "name.md"),
+			content: `+++
+title = '{{ replace .Name "-" " " | title }}'
++++`,
 		},
 		{
 			path: filepath.Join("archetypes", "product.md"),
