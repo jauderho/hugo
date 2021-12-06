@@ -16,12 +16,15 @@
 package create
 
 import (
+	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"mime"
 	"net/http"
+	"net/http/httputil"
 	"net/url"
 	"path"
 	"path/filepath"
@@ -32,6 +35,7 @@ import (
 
 	"github.com/gohugoio/hugo/hugofs"
 
+	"github.com/gohugoio/hugo/cache/filecache"
 	"github.com/gohugoio/hugo/common/hugio"
 	"github.com/gohugoio/hugo/common/maps"
 	"github.com/gohugoio/hugo/common/types"
@@ -45,8 +49,9 @@ import (
 // Client contains methods to create Resource objects.
 // tasks to Resource objects.
 type Client struct {
-	rs         *resources.Spec
-	httpClient *http.Client
+	rs               *resources.Spec
+	httpClient       *http.Client
+	cacheGetResource *filecache.Cache
 }
 
 // New creates a new Client with the given specification.
@@ -56,6 +61,7 @@ func New(rs *resources.Spec) *Client {
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
 		},
+		cacheGetResource: rs.FileCaches.GetResourceCache(),
 	}
 }
 
@@ -156,10 +162,7 @@ func (c *Client) FromRemote(uri string, options map[string]interface{}) (resourc
 
 	resourceID := helpers.HashString(uri, options)
 
-	// This caches to memory and will, in server mode, not be evicted unless the resourceID changes
-	// or the server restarts.
-	// There is ongoing work to improve this.
-	return c.rs.ResourceCache.GetOrCreate(resourceID, func() (resource.Resource, error) {
+	_, httpResponse, err := c.cacheGetResource.GetOrCreate(resourceID, func() (io.ReadCloser, error) {
 		method, reqBody, err := getMethodAndBody(options)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to get method or body for resource %s", uri)
@@ -178,6 +181,14 @@ func (c *Client) FromRemote(uri string, options map[string]interface{}) (resourc
 			}
 			addUserProvidedHeaders(headers, req)
 		}
+
+		// Workaround for https://github.com/golang/go/issues/49366
+		// This is the entire lifetime of the request.
+		ctx, cancel := context.WithTimeout(req.Context(), 30*time.Second)
+		defer cancel()
+
+		req = req.WithContext(ctx)
+
 		res, err := c.httpClient.Do(req)
 		if err != nil {
 			return nil, err
@@ -187,51 +198,67 @@ func (c *Client) FromRemote(uri string, options map[string]interface{}) (resourc
 			return nil, errors.Errorf("failed to retrieve remote resource: %s", http.StatusText(res.StatusCode))
 		}
 
-		body, err := ioutil.ReadAll(res.Body)
+		httpResponse, err := httputil.DumpResponse(res, true)
 		if err != nil {
-			return nil, errors.Wrapf(err, "failed to read remote resource %s", uri)
+			return nil, err
 		}
 
-		filename := path.Base(rURL.Path)
-		if _, params, _ := mime.ParseMediaType(res.Header.Get("Content-Disposition")); params != nil {
-			if _, ok := params["filename"]; ok {
-				filename = params["filename"]
-			}
-		}
-
-		var contentType string
-		if arr, _ := mime.ExtensionsByType(res.Header.Get("Content-Type")); len(arr) == 1 {
-			contentType = arr[0]
-		}
-
-		// If content type was not determined by header, look for a file extention
-		if contentType == "" {
-			if ext := path.Ext(filename); ext != "" {
-				contentType = ext
-			}
-		}
-
-		// If content type was not determined by header or file extention, try using content itself
-		if contentType == "" {
-			if ct := http.DetectContentType(body); ct != "application/octet-stream" {
-				if arr, _ := mime.ExtensionsByType(ct); arr != nil {
-					contentType = arr[0]
-				}
-			}
-		}
-
-		resourceID = filename[:len(filename)-len(path.Ext(filename))] + "_" + resourceID + contentType
-
-		return c.rs.New(
-			resources.ResourceSourceDescriptor{
-				Fs:          c.rs.FileCaches.AssetsCache().Fs,
-				LazyPublish: true,
-				OpenReadSeekCloser: func() (hugio.ReadSeekCloser, error) {
-					return hugio.NewReadSeekerNoOpCloser(bytes.NewReader(body)), nil
-				},
-				RelTargetFilename: filepath.Clean(resourceID),
-			})
+		return hugio.ToReadCloser(bytes.NewReader(httpResponse)), nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	defer httpResponse.Close()
+
+	res, err := http.ReadResponse(bufio.NewReader(httpResponse), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	body, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to read remote resource %s", uri)
+	}
+
+	filename := path.Base(rURL.Path)
+	if _, params, _ := mime.ParseMediaType(res.Header.Get("Content-Disposition")); params != nil {
+		if _, ok := params["filename"]; ok {
+			filename = params["filename"]
+		}
+	}
+
+	var contentType string
+	if arr, _ := mime.ExtensionsByType(res.Header.Get("Content-Type")); len(arr) == 1 {
+		contentType = arr[0]
+	}
+
+	// If content type was not determined by header, look for a file extention
+	if contentType == "" {
+		if ext := path.Ext(filename); ext != "" {
+			contentType = ext
+		}
+	}
+
+	// If content type was not determined by header or file extention, try using content itself
+	if contentType == "" {
+		if ct := http.DetectContentType(body); ct != "application/octet-stream" {
+			if arr, _ := mime.ExtensionsByType(ct); arr != nil {
+				contentType = arr[0]
+			}
+		}
+	}
+
+	resourceID = filename[:len(filename)-len(path.Ext(filename))] + "_" + resourceID + contentType
+
+	return c.rs.New(
+		resources.ResourceSourceDescriptor{
+			LazyPublish: true,
+			OpenReadSeekCloser: func() (hugio.ReadSeekCloser, error) {
+				return hugio.NewReadSeekerNoOpCloser(bytes.NewReader(body)), nil
+			},
+			RelTargetFilename: filepath.Clean(resourceID),
+		})
+
 }
 
 func addDefaultHeaders(req *http.Request, accepts ...string) {
