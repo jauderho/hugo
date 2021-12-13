@@ -186,8 +186,10 @@ func (c *Client) FromRemote(uri string, options map[string]interface{}) (resourc
 			return nil, err
 		}
 
-		if res.StatusCode < 200 || res.StatusCode > 299 {
-			return nil, errors.Errorf("failed to retrieve remote resource: %s", http.StatusText(res.StatusCode))
+		if res.StatusCode != http.StatusNotFound {
+			if res.StatusCode < 200 || res.StatusCode > 299 {
+				return nil, errors.Errorf("failed to retrieve remote resource: %s", http.StatusText(res.StatusCode))
+			}
 		}
 
 		httpResponse, err := httputil.DumpResponse(res, true)
@@ -205,6 +207,11 @@ func (c *Client) FromRemote(uri string, options map[string]interface{}) (resourc
 	res, err := http.ReadResponse(bufio.NewReader(httpResponse), nil)
 	if err != nil {
 		return nil, err
+	}
+
+	if res.StatusCode == http.StatusNotFound {
+		// Not found. This matches how looksup for local resources work.
+		return nil, nil
 	}
 
 	body, err := ioutil.ReadAll(res.Body)
