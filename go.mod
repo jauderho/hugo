@@ -36,17 +36,16 @@ require (
 	github.com/kyokomi/emoji/v2 v2.2.8
 	github.com/magefile/mage v1.11.0
 	github.com/mattn/go-isatty v0.0.14
-	github.com/miekg/mmark v1.3.6
 	github.com/mitchellh/hashstructure v1.1.0
 	github.com/mitchellh/mapstructure v1.4.3
 	github.com/muesli/smartcrop v0.3.0
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646 // indirect
-	github.com/niklasfasching/go-org v1.5.0
+	github.com/niklasfasching/go-org v1.6.0
 	github.com/olekukonko/tablewriter v0.0.5
 	github.com/pelletier/go-toml/v2 v2.0.0-beta.3.0.20210727221244-fa0796069526
 	github.com/pkg/errors v0.9.1
 	github.com/rogpeppe/go-internal v1.8.0
-	github.com/russross/blackfriday v1.5.3-0.20200218234912-41c5fccfd6f6
+	github.com/russross/blackfriday v1.6.0
 	github.com/rwcarlsen/goexif v0.0.0-20190401172101-9e8deecbddbd
 	github.com/sanity-io/litter v1.5.1
 	github.com/spf13/afero v1.6.0

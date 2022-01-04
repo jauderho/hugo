@@ -25,6 +25,7 @@ import (
 	"github.com/gohugoio/hugo/htesting"
 
 	"github.com/gohugoio/hugo/markup/asciidocext"
+	"github.com/gohugoio/hugo/markup/rst"
 
 	"github.com/gohugoio/hugo/config"
 
@@ -374,9 +375,8 @@ func testAllMarkdownEnginesForPages(t *testing.T,
 		shouldExecute func() bool
 	}{
 		{"md", func() bool { return true }},
-		{"mmark", func() bool { return true }},
 		{"ad", func() bool { return asciidocext.Supports() }},
-		{"rst", func() bool { return true }},
+		{"rst", func() bool { return rst.Supports() }},
 	}
 
 	for _, e := range engines {
@@ -385,7 +385,6 @@ func testAllMarkdownEnginesForPages(t *testing.T,
 		}
 
 		t.Run(e.ext, func(t *testing.T) {
-
 			cfg, fs := newTestCfg(func(cfg config.Provider) error {
 				for k, v := range settings {
 					cfg.Set(k, v)
@@ -433,7 +432,6 @@ func testAllMarkdownEnginesForPages(t *testing.T,
 			b.Assert(home, qt.Not(qt.IsNil))
 			b.Assert(home.File().Path(), qt.Equals, homePath)
 			b.Assert(content(home), qt.Contains, "Home Page Content")
-
 		})
 
 	}
