@@ -40,12 +40,12 @@ func TestCodeblocks(t *testing.T) {
     style = 'monokai'
     tabWidth = 4
 -- layouts/_default/_markup/render-codeblock-goat.html --
-{{ $diagram := diagrams.Goat .Code }}
-Goat SVG:{{ substr $diagram.SVG 0 100 | safeHTML }}  }}|
+{{ $diagram := diagrams.Goat .Inner }}
+Goat SVG:{{ substr $diagram.Wrapped 0 100 | safeHTML }}  }}|
 Goat Attribute: {{ .Attributes.width}}|
 -- layouts/_default/_markup/render-codeblock-go.html --
-Go Code: {{ .Code | safeHTML }}|
-Go Language: {{ .Lang }}|
+Go Code: {{ .Inner | safeHTML }}|
+Go Language: {{ .Type }}|
 -- layouts/_default/single.html --
 {{ .Content }}
 -- content/p1.md --
@@ -113,6 +113,57 @@ Go Language: golang|
 	)
 }
 
+func TestHighlightCodeblock(t *testing.T) {
+	t.Parallel()
+
+	files := `
+-- config.toml --
+[markup]
+[markup.highlight]
+anchorLineNos = false
+codeFences = true
+guessSyntax = false
+hl_Lines = ''
+lineAnchors = ''
+lineNoStart = 1
+lineNos = false
+lineNumbersInTable = true
+noClasses = false
+style = 'monokai'
+tabWidth = 4
+-- layouts/_default/_markup/render-codeblock.html --
+{{ $result := transform.HighlightCodeBlock . }}
+Inner: |{{ $result.Inner | safeHTML }}|
+Wrapped: |{{ $result.Wrapped | safeHTML }}|
+-- layouts/_default/single.html --
+{{ .Content }}
+-- content/p1.md --
+---
+title: "p1"
+---
+
+## Go Code
+
+§§§go
+fmt.Println("Hello, World!");
+§§§
+
+`
+
+	b := hugolib.NewIntegrationTestBuilder(
+		hugolib.IntegrationTestConfig{
+			T:           t,
+			TxtarString: files,
+			NeedsOsFS:   false,
+		},
+	).Build()
+
+	b.AssertFileContent("public/p1/index.html",
+		"Inner: |<span class=\"line\"><span class=\"cl\"><span class=\"nx\">fmt</span><span class=\"p\">.</span><span class=\"nf\">Println</span><span class=\"p\">(</span><span class=\"s\">&#34;Hello, World!&#34;</span><span class=\"p\">);</span></span></span>|",
+		"Wrapped: |<div class=\"highlight\"><pre tabindex=\"0\" class=\"chroma\"><code class=\"language-go\" data-lang=\"go\"><span class=\"line\"><span class=\"cl\"><span class=\"nx\">fmt</span><span class=\"p\">.</span><span class=\"nf\">Println</span><span class=\"p\">(</span><span class=\"s\">&#34;Hello, World!&#34;</span><span class=\"p\">);</span></span></span></code></pre></div>|",
+	)
+}
+
 func TestCodeChomp(t *testing.T) {
 	t.Parallel()
 
@@ -129,7 +180,7 @@ echo "p1";
 -- layouts/_default/single.html --
 {{ .Content }}
 -- layouts/_default/_markup/render-codeblock.html --
-|{{ .Code | safeHTML }}|
+|{{ .Inner | safeHTML }}|
 
 `
 
