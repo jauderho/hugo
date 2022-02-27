@@ -14,6 +14,7 @@
 package codeblocks_test
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -54,25 +55,25 @@ title: "p1"
 
 ## Ascii Diagram
 
-CODE_FENCEgoat { width="600" }
+§§§goat { width="600" }
 --->
-CODE_FENCE
+§§§
 
 ## Go Code
 
-CODE_FENCEgo
+§§§go
 fmt.Println("Hello, World!");
-CODE_FENCE
+§§§
 
 ## Golang Code
 
-CODE_FENCEgolang
+§§§golang
 fmt.Println("Hello, Golang!");
-CODE_FENCE
+§§§
 
 ## Bash Code
 
-CODE_FENCEbash { linenos=inline,hl_lines=[2,"5-6"],linenostart=32 class=blue }
+§§§bash { linenos=inline,hl_lines=[2,"5-6"],linenostart=32 class=blue }
 echo "l1";
 echo "l2";
 echo "l3";
@@ -81,10 +82,8 @@ echo "l5";
 echo "l6";
 echo "l7";
 echo "l8";
-CODE_FENCE
+§§§
 `
-
-	files = strings.ReplaceAll(files, "CODE_FENCE", "```")
 
 	b := hugolib.NewIntegrationTestBuilder(
 		hugolib.IntegrationTestConfig{
@@ -112,4 +111,106 @@ Go Language: golang|
 		"<h2 id=\"golang-code\">Golang Code</h2>\nGo Code: fmt.Println(\"Hello, Golang!\");\n|\nGo Language: golang|",
 		"<h2 id=\"bash-code\">Bash Code</h2>\n<div class=\"highlight blue\"><pre tabindex=\"0\" class=\"chroma\"><code class=\"language-bash\" data-lang=\"bash\"><span class=\"line\"><span class=\"ln\">32</span><span class=\"cl\"><span class=\"nb\">echo</span> <span class=\"s2\">&#34;l1&#34;</span><span class=\"p\">;</span>\n</span></span><span class=\"line hl\"><span class=\"ln\">33</span>",
 	)
+}
+
+func TestCodeChomp(t *testing.T) {
+	t.Parallel()
+
+	files := `
+-- config.toml --
+-- content/p1.md --
+---
+title: "p1"
+---
+
+§§§bash
+echo "p1";
+§§§
+-- layouts/_default/single.html --
+{{ .Content }}
+-- layouts/_default/_markup/render-codeblock.html --
+|{{ .Code | safeHTML }}|
+
+`
+
+	b := hugolib.NewIntegrationTestBuilder(
+		hugolib.IntegrationTestConfig{
+			T:           t,
+			TxtarString: files,
+			NeedsOsFS:   false,
+		},
+	).Build()
+
+	b.AssertFileContent("public/p1/index.html", "|echo \"p1\";|")
+}
+
+func TestCodePosition(t *testing.T) {
+	t.Parallel()
+
+	files := `
+-- config.toml --
+-- content/p1.md --
+---
+title: "p1"
+---
+
+##   Code
+
+§§§
+echo "p1";
+§§§
+-- layouts/_default/single.html --
+{{ .Content }}
+-- layouts/_default/_markup/render-codeblock.html --
+Position: {{ .Position | safeHTML }}
+
+
+`
+
+	b := hugolib.NewIntegrationTestBuilder(
+		hugolib.IntegrationTestConfig{
+			T:           t,
+			TxtarString: files,
+		},
+	).Build()
+
+	b.AssertFileContent("public/p1/index.html", filepath.FromSlash("Position: \"content/p1.md:7:1\""))
+}
+
+// Issue 9571
+func TestAttributesChroma(t *testing.T) {
+	t.Parallel()
+
+	files := `
+-- config.toml --
+-- content/p1.md --
+---
+title: "p1"
+---
+
+##   Code
+
+§§§LANGUAGE {style=monokai}
+echo "p1";
+§§§
+-- layouts/_default/single.html --
+{{ .Content }}
+-- layouts/_default/_markup/render-codeblock.html --
+Attributes: {{ .Attributes }}|Options: {{ .Options }}|
+
+
+`
+	testLanguage := func(language, expect string) {
+		b := hugolib.NewIntegrationTestBuilder(
+			hugolib.IntegrationTestConfig{
+				T:           t,
+				TxtarString: strings.ReplaceAll(files, "LANGUAGE", language),
+			},
+		).Build()
+
+		b.AssertFileContent("public/p1/index.html", expect)
+	}
+
+	testLanguage("bash", "Attributes: map[]|Options: map[style:monokai]|")
+	testLanguage("hugo", "Attributes: map[style:monokai]|Options: map[]|")
 }
