@@ -9,7 +9,7 @@ require (
 	github.com/bep/debounce v1.2.0
 	github.com/bep/gitmap v1.1.2
 	github.com/bep/goat v0.5.0
-	github.com/bep/godartsass v0.12.0
+	github.com/bep/godartsass v0.14.0
 	github.com/bep/golibsass v1.0.0
 	github.com/bep/gowebp v0.1.0
 	github.com/bep/tmc v0.5.1
@@ -50,12 +50,12 @@ require (
 	github.com/sanity-io/litter v1.5.2
 	github.com/spf13/afero v1.8.1
 	github.com/spf13/cast v1.4.1
-	github.com/spf13/cobra v1.3.0
+	github.com/spf13/cobra v1.4.0
 	github.com/spf13/fsync v0.9.0
 	github.com/spf13/jwalterweatherman v1.1.0
 	github.com/spf13/pflag v1.0.5
 	github.com/tdewolff/minify/v2 v2.10.0
-	github.com/yuin/goldmark v1.4.10
+	github.com/yuin/goldmark v1.4.11
 	go.uber.org/atomic v1.9.0
 	gocloud.dev v0.20.0
 	golang.org/x/image v0.0.0-20211028202545-6944b10bf410
