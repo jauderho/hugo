@@ -38,6 +38,8 @@ const (
 )
 
 var (
+	// buildDate allows vendor-specified build date when .git/ is unavailable.
+	buildDate string
 	// vendorInfo contains vendor notes about the current build.
 	vendorInfo string
 )
@@ -66,7 +68,7 @@ func (i Info) Version() VersionString {
 
 // Generator a Hugo meta generator HTML tag.
 func (i Info) Generator() template.HTML {
-	return template.HTML(fmt.Sprintf(`<meta name="generator" content="Hugo %s" />`, CurrentVersion.String()))
+	return template.HTML(fmt.Sprintf(`<meta name="generator" content="Hugo %s">`, CurrentVersion.String()))
 }
 
 func (i Info) IsProduction() bool {
