@@ -24,7 +24,7 @@ jobs:
             This pull request has been automatically locked since there
             has not been any recent activity after it was closed.
             Please open a new issue for related bugs.
-      - uses: actions/stale@04a1828bc18ada028d85a0252a47cd2963a91abe
+      - uses: actions/stale@03af7c36d33f4905e618fac0a1bb7e6d05f0d41b
         with:
           operations-per-run: 999
           days-before-issue-stale: 365
