@@ -35,6 +35,16 @@ func New() *Namespace {
 // Namespace provides template functions for the "math" namespace.
 type Namespace struct{}
 
+// Abs returns the absolute value of n.
+func (ns *Namespace) Abs(n any) (float64, error) {
+	af, err := cast.ToFloat64E(n)
+	if err != nil {
+		return 0, errors.New("the math.Abs function requires a numeric argument")
+	}
+
+	return math.Abs(af), nil
+}
+
 // Add adds the multivalued addends n1 and n2 or more values.
 func (ns *Namespace) Add(inputs ...any) (any, error) {
 	return ns.doArithmetic(inputs, '+')
@@ -208,6 +218,7 @@ var counter uint64
 // have the needed precision (especially on Windows).
 // Note that given the parallel nature of Hugo, you cannot use this to get sequences of numbers,
 // and the counter will reset on new builds.
+// <docsmeta>{"identifiers": ["now.UnixNano"] }</docsmeta>
 func (ns *Namespace) Counter() uint64 {
 	return atomic.AddUint64(&counter, uint64(1))
 }
