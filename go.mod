@@ -13,8 +13,10 @@ require (
 	github.com/bep/godartsass v0.16.0
 	github.com/bep/golibsass v1.1.0
 	github.com/bep/gowebp v0.2.0
+	github.com/bep/helpers v0.4.0
 	github.com/bep/lazycache v0.2.0
 	github.com/bep/overlayfs v0.6.0
+	github.com/bep/simplecobra v0.2.0
 	github.com/bep/tmc v0.5.1
 	github.com/clbanning/mxj/v2 v2.5.7
 	github.com/cli/safeexec v1.0.0
@@ -46,7 +48,7 @@ require (
 	github.com/muesli/smartcrop v0.3.0
 	github.com/niklasfasching/go-org v1.6.6
 	github.com/olekukonko/tablewriter v0.0.5
-	github.com/pelletier/go-toml/v2 v2.0.6
+	github.com/pelletier/go-toml/v2 v2.0.8
 	github.com/rogpeppe/go-internal v1.10.1-0.20230508101108-a4f6fabd84c5
 	github.com/rwcarlsen/goexif v0.0.0-20190401172101-9e8deecbddbd
 	github.com/sanity-io/litter v1.5.5
@@ -94,8 +96,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sso v1.4.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.7.0 // indirect
 	github.com/aws/smithy-go v1.8.0 // indirect
-	github.com/bep/helpers v0.4.0 // indirect
-	github.com/bep/simplecobra v0.2.0 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.2 // indirect
 	github.com/dlclark/regexp2 v1.7.0 // indirect
 	github.com/go-openapi/jsonpointer v0.19.5 // indirect
