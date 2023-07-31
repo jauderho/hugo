@@ -30,8 +30,9 @@
 package commands
 
 import (
-	"errors"
+	"context"
 
+	"github.com/bep/simplecobra"
 	"github.com/spf13/cobra"
 )
 
@@ -41,7 +42,7 @@ func newDeployCommand() simplecobra.Commander {
 		run: func(ctx context.Context, cd *simplecobra.Commandeer, r *rootCommand, args []string) error {
 			return nil
 		},
-		withc: func(cmd *cobra.Command) {
+		withc: func(cmd *cobra.Command, r *rootCommand) {
 			cmd.Hidden = true
 		},
 	}

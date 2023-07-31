@@ -17,17 +17,16 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"mime"
 	"net/url"
 	"path"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/bep/logg"
 	"github.com/gohugoio/hugo/common/herrors"
 	"github.com/gohugoio/hugo/common/htime"
 	"github.com/gohugoio/hugo/common/hugio"
@@ -36,8 +35,6 @@ import (
 
 	"github.com/gohugoio/hugo/common/paths"
 
-	"github.com/gohugoio/hugo/resources"
-
 	"github.com/gohugoio/hugo/identity"
 
 	"github.com/gohugoio/hugo/markup/converter/hooks"
@@ -45,6 +42,7 @@ import (
 	"github.com/gohugoio/hugo/markup/converter"
 
 	"github.com/gohugoio/hugo/hugofs/files"
+	hglob "github.com/gohugoio/hugo/hugofs/glob"
 
 	"github.com/gohugoio/hugo/common/maps"
 
@@ -54,6 +52,7 @@ import (
 
 	"github.com/gohugoio/hugo/langs"
 
+	"github.com/gohugoio/hugo/resources/kinds"
 	"github.com/gohugoio/hugo/resources/page"
 
 	"github.com/gohugoio/hugo/config"
@@ -250,7 +249,7 @@ func (s *Site) initRenderFormats() {
 	})
 
 	// Add the per kind configured output formats
-	for _, kind := range allKindsInPages {
+	for _, kind := range kinds.AllKindsInPages {
 		if siteFormats, found := s.conf.C.KindOutputFormats[kind]; found {
 			for _, f := range siteFormats {
 				if !formatSet[f.Name] {
@@ -273,17 +272,18 @@ func (s *Site) Language() *langs.Language {
 	return s.language
 }
 
+func (s *Site) Languages() langs.Languages {
+	return s.h.Configs.Languages
+}
+
 func (s *Site) isEnabled(kind string) bool {
-	if kind == kindUnknown {
-		panic("Unknown kind")
-	}
 	return s.conf.IsKindEnabled(kind)
 }
 
 type siteRefLinker struct {
 	s *Site
 
-	errorLogger *log.Logger
+	errorLogger logg.LevelLogger
 	notFoundURL string
 }
 
@@ -300,11 +300,11 @@ func newSiteRefLinker(s *Site) (siteRefLinker, error) {
 
 func (s siteRefLinker) logNotFound(ref, what string, p page.Page, position text.Position) {
 	if position.IsValid() {
-		s.errorLogger.Printf("[%s] REF_NOT_FOUND: Ref %q: %s: %s", s.s.Lang(), ref, position.String(), what)
+		s.errorLogger.Logf("[%s] REF_NOT_FOUND: Ref %q: %s: %s", s.s.Lang(), ref, position.String(), what)
 	} else if p == nil {
-		s.errorLogger.Printf("[%s] REF_NOT_FOUND: Ref %q: %s", s.s.Lang(), ref, what)
+		s.errorLogger.Logf("[%s] REF_NOT_FOUND: Ref %q: %s", s.s.Lang(), ref, what)
 	} else {
-		s.errorLogger.Printf("[%s] REF_NOT_FOUND: Ref %q from page %q: %s", s.s.Lang(), ref, p.Pathc(), what)
+		s.errorLogger.Logf("[%s] REF_NOT_FOUND: Ref %q from page %q: %s", s.s.Lang(), ref, p.Pathc(), what)
 	}
 }
 
@@ -387,8 +387,8 @@ func (s *siteRefLinker) refLink(ref string, source any, relative bool, outputFor
 	return link, nil
 }
 
-func (s *Site) running() bool {
-	return s.h != nil && s.h.Configs.Base.Internal.Running
+func (s *Site) watching() bool {
+	return s.h != nil && s.h.Configs.Base.Internal.Watch
 }
 
 type whatChanged struct {
@@ -479,16 +479,6 @@ func (s *Site) translateFileEvents(events []fsnotify.Event) []fsnotify.Event {
 	return filtered
 }
 
-var (
-	// These are only used for cache busting, so false positives are fine.
-	// We also deliberately do not match for file suffixes to also catch
-	// directory names.
-	// TODO(bep) consider this when completing the relevant PR rewrite on this.
-	cssFileRe   = regexp.MustCompile("(css|sass|scss)")
-	cssConfigRe = regexp.MustCompile(`(postcss|tailwind)\.config\.js`)
-	jsFileRe    = regexp.MustCompile("(js|ts|jsx|tsx)")
-)
-
 // reBuild partially rebuilds a site given the filesystem events.
 // It returns whatever the content source was changed.
 // TODO(bep) clean up/rewrite this method.
@@ -515,29 +505,18 @@ func (s *Site) processPartial(config *BuildCfg, init func(config *BuildCfg) erro
 		i18nChanged bool
 
 		sourceFilesChanged = make(map[string]bool)
-
-		// prevent spamming the log on changes
-		logger = helpers.NewDistinctErrorLogger()
 	)
 
-	var cachePartitions []string
-	// Special case
-	// TODO(bep) I have a ongoing branch where I have redone the cache. Consider this there.
-	var (
-		evictCSSRe *regexp.Regexp
-		evictJSRe  *regexp.Regexp
-	)
+	var cacheBusters []func(string) bool
+	bcfg := s.conf.Build
 
 	for _, ev := range events {
-		if assetsFilename, _ := s.BaseFs.Assets.MakePathRelative(ev.Name); assetsFilename != "" {
-			cachePartitions = append(cachePartitions, resources.ResourceKeyPartitions(assetsFilename)...)
-			if evictCSSRe == nil {
-				if cssFileRe.MatchString(assetsFilename) || cssConfigRe.MatchString(assetsFilename) {
-					evictCSSRe = cssFileRe
-				}
-			}
-			if evictJSRe == nil && jsFileRe.MatchString(assetsFilename) {
-				evictJSRe = jsFileRe
+		component, relFilename := s.BaseFs.MakePathRelative(ev.Name)
+		if relFilename != "" {
+			p := hglob.NormalizePath(path.Join(component, relFilename))
+			g, err := bcfg.MatchCacheBuster(s.Log, p)
+			if err == nil && g != nil {
+				cacheBusters = append(cacheBusters, g)
 			}
 		}
 
@@ -547,7 +526,7 @@ func (s *Site) processPartial(config *BuildCfg, init func(config *BuildCfg) erro
 
 			switch id.Type {
 			case files.ComponentFolderContent:
-				logger.Println("Source changed", ev)
+				s.Log.Println("Source changed", ev)
 				sourceChanged = append(sourceChanged, ev)
 			case files.ComponentFolderLayouts:
 				tmplChanged = true
@@ -555,16 +534,16 @@ func (s *Site) processPartial(config *BuildCfg, init func(config *BuildCfg) erro
 					tmplAdded = true
 				}
 				if tmplAdded {
-					logger.Println("Template added", ev)
+					s.Log.Println("Template added", ev)
 				} else {
-					logger.Println("Template changed", ev)
+					s.Log.Println("Template changed", ev)
 				}
 
 			case files.ComponentFolderData:
-				logger.Println("Data changed", ev)
+				s.Log.Println("Data changed", ev)
 				dataChanged = true
 			case files.ComponentFolderI18n:
-				logger.Println("i18n changed", ev)
+				s.Log.Println("i18n changed", ev)
 				i18nChanged = true
 
 			}
@@ -582,15 +561,21 @@ func (s *Site) processPartial(config *BuildCfg, init func(config *BuildCfg) erro
 		return err
 	}
 
+	var cacheBusterOr func(string) bool
+	if len(cacheBusters) > 0 {
+		cacheBusterOr = func(s string) bool {
+			for _, cb := range cacheBusters {
+				if cb(s) {
+					return true
+				}
+			}
+			return false
+		}
+	}
+
 	// These in memory resource caches will be rebuilt on demand.
-	for _, s := range s.h.Sites {
-		s.ResourceSpec.ResourceCache.DeletePartitions(cachePartitions...)
-		if evictCSSRe != nil {
-			s.ResourceSpec.ResourceCache.DeleteMatches(evictCSSRe)
-		}
-		if evictJSRe != nil {
-			s.ResourceSpec.ResourceCache.DeleteMatches(evictJSRe)
-		}
+	if len(cacheBusters) > 0 {
+		s.h.ResourceSpec.ResourceCache.DeleteMatches(cacheBusterOr)
 	}
 
 	if tmplChanged || i18nChanged {
@@ -799,8 +784,10 @@ func (s *Site) assembleMenus() {
 						navigation.SetPageValues(me, p)
 					}
 				}
+			}
 
-			} else {
+			// If page is still nill, we must make sure that we have a URL that considers baseURL etc.
+			if types.IsNil(me.Page) {
 				me.ConfiguredURL = s.createNodeMenuEntryURL(me.MenuConfig.URL)
 			}
 
@@ -896,23 +883,18 @@ func (s *Site) getLanguageTargetPathLang(alwaysInSubDir bool) string {
 	return s.getLanguagePermalinkLang(alwaysInSubDir)
 }
 
-// get any lanaguagecode to prefix the relative permalink with.
+// get any language code to prefix the relative permalink with.
 func (s *Site) getLanguagePermalinkLang(alwaysInSubDir bool) string {
-	if !s.h.isMultiLingual() || s.h.Conf.IsMultihost() {
+	if s.h.Conf.IsMultihost() {
 		return ""
 	}
 
-	if alwaysInSubDir {
+	if s.h.Conf.IsMultiLingual() && alwaysInSubDir {
 		return s.Language().Lang
 	}
 
-	isDefault := s.Language().Lang == s.conf.DefaultContentLanguage
+	return s.GetLanguagePrefix()
 
-	if !isDefault || s.conf.DefaultContentLanguageInSubdir {
-		return s.Language().Lang
-	}
-
-	return ""
 }
 
 func (s *Site) getTaxonomyKey(key string) string {
@@ -1020,7 +1002,6 @@ func (s *Site) lookupLayouts(layouts ...string) tpl.Template {
 }
 
 func (s *Site) renderAndWriteXML(ctx context.Context, statCounter *uint64, name string, targetPath string, d any, templ tpl.Template) error {
-	s.Log.Debugf("Render XML for %q to %q", name, targetPath)
 	renderBuffer := bp.GetBuffer()
 	defer bp.PutBuffer(renderBuffer)
 
@@ -1042,7 +1023,6 @@ func (s *Site) renderAndWriteXML(ctx context.Context, statCounter *uint64, name 
 }
 
 func (s *Site) renderAndWritePage(statCounter *uint64, name string, targetPath string, p *pageState, templ tpl.Template) error {
-	s.Log.Debugf("Render %s to %q", name, targetPath)
 	s.h.IncrPageRender()
 	renderBuffer := bp.GetBuffer()
 	defer bp.PutBuffer(renderBuffer)
@@ -1076,7 +1056,7 @@ func (s *Site) renderAndWritePage(statCounter *uint64, name string, targetPath s
 			pd.AbsURLPath = s.absURLPath(targetPath)
 		}
 
-		if s.running() && s.conf.Internal.Watch && !s.conf.Internal.DisableLiveReload {
+		if s.watching() && s.conf.Internal.Running && !s.conf.DisableLiveReload {
 			pd.LiveReloadBaseURL = s.Conf.BaseURLLiveReload().URL()
 		}
 
@@ -1159,19 +1139,19 @@ func (s *Site) publish(statCounter *uint64, path string, r io.Reader, fs afero.F
 func (s *Site) kindFromFileInfoOrSections(fi *fileInfo, sections []string) string {
 	if fi.TranslationBaseName() == "_index" {
 		if fi.Dir() == "" {
-			return page.KindHome
+			return kinds.KindHome
 		}
 
 		return s.kindFromSections(sections)
 
 	}
 
-	return page.KindPage
+	return kinds.KindPage
 }
 
 func (s *Site) kindFromSections(sections []string) string {
 	if len(sections) == 0 {
-		return page.KindHome
+		return kinds.KindHome
 	}
 
 	return s.kindFromSectionPath(path.Join(sections...))
@@ -1181,16 +1161,16 @@ func (s *Site) kindFromSectionPath(sectionPath string) string {
 	var taxonomiesConfig taxonomiesConfig = s.conf.Taxonomies
 	for _, plural := range taxonomiesConfig {
 		if plural == sectionPath {
-			return page.KindTaxonomy
+			return kinds.KindTaxonomy
 		}
 
 		if strings.HasPrefix(sectionPath, plural) {
-			return page.KindTerm
+			return kinds.KindTerm
 		}
 
 	}
 
-	return page.KindSection
+	return kinds.KindSection
 }
 
 func (s *Site) newPage(

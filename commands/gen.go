@@ -15,6 +15,7 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path"
@@ -26,6 +27,7 @@ import (
 	"github.com/alecthomas/chroma/v2/styles"
 	"github.com/bep/simplecobra"
 	"github.com/gohugoio/hugo/common/hugo"
+	"github.com/gohugoio/hugo/docshelper"
 	"github.com/gohugoio/hugo/helpers"
 	"github.com/gohugoio/hugo/hugofs"
 	"github.com/spf13/cobra"
@@ -68,7 +70,7 @@ See https://xyproto.github.io/splash/docs/all.html for a preview of the availabl
 				formatter.WriteCSS(os.Stdout, style)
 				return nil
 			},
-			withc: func(cmd *cobra.Command) {
+			withc: func(cmd *cobra.Command, r *rootCommand) {
 				cmd.PersistentFlags().StringVar(&style, "style", "friendly", "highlighter style (see https://xyproto.github.io/splash/docs/)")
 				cmd.PersistentFlags().StringVar(&highlightStyle, "highlightStyle", "bg:#ffffcc", "style used for highlighting lines (see https://github.com/alecthomas/chroma)")
 				cmd.PersistentFlags().StringVar(&linesStyle, "linesStyle", "", "style used for line numbers (see https://github.com/alecthomas/chroma)")
@@ -108,7 +110,7 @@ See https://xyproto.github.io/splash/docs/all.html for a preview of the availabl
 
 				return nil
 			},
-			withc: func(cmd *cobra.Command) {
+			withc: func(cmd *cobra.Command, r *rootCommand) {
 				cmd.PersistentFlags().StringVar(&genmandir, "dir", "man/", "the directory to write the man pages.")
 				// For bash-completion
 				cmd.PersistentFlags().SetAnnotation("dir", cobra.BashCompSubdirsInDir, []string{})
@@ -165,7 +167,7 @@ url: %s
 
 				return nil
 			},
-			withc: func(cmd *cobra.Command) {
+			withc: func(cmd *cobra.Command, r *rootCommand) {
 				cmd.PersistentFlags().StringVar(&gendocdir, "dir", "/tmp/hugodoc/", "the directory to write the doc.")
 				// For bash-completion
 				cmd.PersistentFlags().SetAnnotation("dir", cobra.BashCompSubdirsInDir, []string{})
@@ -174,11 +176,47 @@ url: %s
 
 	}
 
+	var docsHelperTarget string
+
+	newDocsHelper := func() simplecobra.Commander {
+		return &simpleCommand{
+			name:  "docshelper",
+			short: "Generate some data files for the Hugo docs.",
+
+			run: func(ctx context.Context, cd *simplecobra.Commandeer, r *rootCommand, args []string) error {
+				r.Println("Generate docs data to", docsHelperTarget)
+
+				targetFile := filepath.Join(docsHelperTarget, "docs.json")
+
+				f, err := os.Create(targetFile)
+				if err != nil {
+					return err
+				}
+				defer f.Close()
+
+				enc := json.NewEncoder(f)
+				enc.SetIndent("", "  ")
+
+				if err := enc.Encode(docshelper.GetDocProvider()); err != nil {
+					return err
+				}
+
+				r.Println("Done!")
+				return nil
+			},
+			withc: func(cmd *cobra.Command, r *rootCommand) {
+				cmd.Hidden = true
+				cmd.PersistentFlags().StringVarP(&docsHelperTarget, "dir", "", "docs/data", "data dir")
+			},
+		}
+	}
+
 	return &genCommand{
 		commands: []simplecobra.Commander{
 			newChromaStyles(),
 			newGen(),
 			newMan(),
+			newDocsHelper(),
 		},
 	}
 
@@ -202,12 +240,15 @@ func (c *genCommand) Run(ctx context.Context, cd *simplecobra.Commandeer, args [
 	return nil
 }
 
-func (c *genCommand) WithCobraCommand(cmd *cobra.Command) error {
+func (c *genCommand) Init(cd *simplecobra.Commandeer) error {
+	cmd := cd.CobraCommand
 	cmd.Short = "A collection of several useful generators."
+
+	cmd.RunE = nil
 	return nil
 }
 
-func (c *genCommand) Init(cd, runner *simplecobra.Commandeer) error {
+func (c *genCommand) PreRun(cd, runner *simplecobra.Commandeer) error {
 	c.rootCmd = cd.Root.Command.(*rootCommand)
 	return nil
 }

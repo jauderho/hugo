@@ -27,6 +27,7 @@ type AllProvider interface {
 	Language() *langs.Language
 	Languages() langs.Languages
 	LanguagesDefaultFirst() langs.Languages
+	LanguagePrefix() string
 	BaseURL() urls.BaseURL
 	BaseURLLiveReload() urls.BaseURL
 	Environment() string
@@ -57,13 +58,14 @@ type AllProvider interface {
 	EnableMissingTranslationPlaceholders() bool
 	TemplateMetrics() bool
 	TemplateMetricsHints() bool
-	LogI18nWarnings() bool
+	PrintI18nWarnings() bool
 	CreateTitle(s string) string
 	IgnoreFile(s string) bool
 	NewContentEditor() string
 	Timeout() time.Duration
 	StaticDirs() []string
 	IgnoredErrors() map[string]bool
+	WorkingDir() string
 }
 
 // Provider provides the configuration settings for Hugo.

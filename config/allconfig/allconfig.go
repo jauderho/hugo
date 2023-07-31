@@ -12,7 +12,7 @@
 // limitations under the License.
 
 // Package allconfig contains the full configuration for Hugo.
-// <docsmeta>{ "name": "Configuration", "description": "This section holds all configiration options in Hugo." }</docsmeta>
+// <docsmeta>{ "name": "Configuration", "description": "This section holds all configuration options in Hugo." }</docsmeta>
 package allconfig
 
 import (
@@ -23,9 +23,11 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gohugoio/hugo/cache/filecache"
+	"github.com/gohugoio/hugo/common/loggers"
 	"github.com/gohugoio/hugo/common/maps"
 	"github.com/gohugoio/hugo/common/urls"
 	"github.com/gohugoio/hugo/config"
@@ -43,6 +45,7 @@ import (
 	"github.com/gohugoio/hugo/output"
 	"github.com/gohugoio/hugo/related"
 	"github.com/gohugoio/hugo/resources/images"
+	"github.com/gohugoio/hugo/resources/kinds"
 	"github.com/gohugoio/hugo/resources/page"
 	"github.com/gohugoio/hugo/resources/page/pagemeta"
 	"github.com/spf13/afero"
@@ -55,19 +58,43 @@ type InternalConfig struct {
 	// Server mode?
 	Running bool
 
-	Quiet             bool
-	Verbose           bool
-	Clock             string
-	Watch             bool
-	DisableLiveReload bool
-	LiveReloadPort    int
+	Quiet          bool
+	Verbose        bool
+	Clock          string
+	Watch          bool
+	LiveReloadPort int
+}
+
+// All non-params config keys for language.
+var configLanguageKeys map[string]bool
+
+func init() {
+	skip := map[string]bool{
+		"internal":   true,
+		"c":          true,
+		"rootconfig": true,
+	}
+	configLanguageKeys = make(map[string]bool)
+	addKeys := func(v reflect.Value) {
+		for i := 0; i < v.NumField(); i++ {
+			name := strings.ToLower(v.Type().Field(i).Name)
+			if skip[name] {
+				continue
+			}
+			configLanguageKeys[name] = true
+		}
+	}
+	addKeys(reflect.ValueOf(Config{}))
+	addKeys(reflect.ValueOf(RootConfig{}))
+	addKeys(reflect.ValueOf(config.CommonDirs{}))
+	addKeys(reflect.ValueOf(langs.LanguageConfig{}))
 }
 
 type Config struct {
 	// For internal use only.
 	Internal InternalConfig `mapstructure:"-" json:"-"`
 	// For internal use only.
-	C ConfigCompiled `mapstructure:"-" json:"-"`
+	C *ConfigCompiled `mapstructure:"-" json:"-"`
 
 	RootConfig
 
@@ -123,7 +150,7 @@ type Config struct {
 	Minify minifiers.MinifyConfig `mapstructure:"-"`
 
 	// Permalink configuration.
-	Permalinks map[string]string `mapstructure:"-"`
+	Permalinks map[string]map[string]string `mapstructure:"-"`
 
 	// Taxonomy configuration.
 	Taxonomies map[string]string `mapstructure:"-"`
@@ -158,11 +185,29 @@ type Config struct {
 }
 
 type configCompiler interface {
-	CompileConfig() error
+	CompileConfig(logger loggers.Logger) error
 }
 
 func (c Config) cloneForLang() *Config {
 	x := c
+	x.C = nil
+	copyStringSlice := func(in []string) []string {
+		if in == nil {
+			return nil
+		}
+		out := make([]string, len(in))
+		copy(out, in)
+		return out
+	}
+
+	// Copy all the slices to avoid sharing.
+	x.DisableKinds = copyStringSlice(x.DisableKinds)
+	x.DisableLanguages = copyStringSlice(x.DisableLanguages)
+	x.MainSections = copyStringSlice(x.MainSections)
+	x.IgnoreErrors = copyStringSlice(x.IgnoreErrors)
+	x.IgnoreFiles = copyStringSlice(x.IgnoreFiles)
+	x.Theme = copyStringSlice(x.Theme)
+
 	// Collapse all static dirs to one.
 	x.StaticDir = x.staticDirs()
 	// These will go away soon ...
@@ -181,7 +226,8 @@ func (c Config) cloneForLang() *Config {
 	return &x
 }
 
-func (c *Config) CompileConfig() error {
+func (c *Config) CompileConfig(logger loggers.Logger) error {
+	var transientErr error
 	s := c.Timeout
 	if _, err := strconv.Atoi(s); err == nil {
 		// A number, assume seconds.
@@ -193,13 +239,31 @@ func (c *Config) CompileConfig() error {
 	}
 	disabledKinds := make(map[string]bool)
 	for _, kind := range c.DisableKinds {
-		disabledKinds[strings.ToLower(kind)] = true
+		kind = strings.ToLower(kind)
+		if newKind := kinds.IsDeprecatedAndReplacedWith(kind); newKind != "" {
+			logger.Deprecatef(false, "Kind %q used in disableKinds is deprecated, use %q instead.", kind, newKind)
+			// Legacy config.
+			kind = newKind
+		}
+		if kinds.GetKindAny(kind) == "" {
+			logger.Warnf("Unknown kind %q in disableKinds configuration.", kind)
+			continue
+		}
+		disabledKinds[kind] = true
 	}
 	kindOutputFormats := make(map[string]output.Formats)
 	isRssDisabled := disabledKinds["rss"]
 	outputFormats := c.OutputFormats.Config
 	for kind, formats := range c.Outputs {
+		if newKind := kinds.IsDeprecatedAndReplacedWith(kind); newKind != "" {
+			logger.Deprecatef(false, "Kind %q used in outputs configuration is deprecated, use %q instead.", kind, newKind)
+			kind = newKind
+		}
 		if disabledKinds[kind] {
+			continue
+		}
+		if kinds.GetKindAny(kind) == "" {
+			logger.Warnf("Unknown kind %q in outputs configuration.", kind)
 			continue
 		}
 		for _, format := range formats {
@@ -209,7 +273,8 @@ func (c *Config) CompileConfig() error {
 			}
 			f, found := outputFormats.GetByName(format)
 			if !found {
-				return fmt.Errorf("unknown output format %q for kind %q", format, kind)
+				transientErr = fmt.Errorf("unknown output format %q for kind %q", format, kind)
+				continue
 			}
 			kindOutputFormats[kind] = append(kindOutputFormats[kind], f)
 		}
@@ -221,6 +286,14 @@ func (c *Config) CompileConfig() error {
 			return fmt.Errorf("cannot disable default content language %q", lang)
 		}
 		disabledLangs[lang] = true
+	}
+	for lang, language := range c.Languages {
+		if language.Disabled {
+			disabledLangs[lang] = true
+			if lang == c.DefaultContentLanguage {
+				return fmt.Errorf("cannot disable default content language %q", lang)
+			}
+		}
 	}
 
 	ignoredErrors := make(map[string]bool)
@@ -275,7 +348,7 @@ func (c *Config) CompileConfig() error {
 		}
 	}
 
-	c.C = ConfigCompiled{
+	c.C = &ConfigCompiled{
 		Timeout:           timeout,
 		BaseURL:           baseURL,
 		BaseURLLiveReload: baseURL,
@@ -288,11 +361,12 @@ func (c *Config) CompileConfig() error {
 		IgnoreFile:        ignoreFile,
 		MainSections:      c.MainSections,
 		Clock:             clock,
+		transientErr:      transientErr,
 	}
 
 	for _, s := range allDecoderSetups {
 		if getCompiler := s.getCompiler; getCompiler != nil {
-			if err := getCompiler(c).CompileConfig(); err != nil {
+			if err := getCompiler(c).CompileConfig(logger); err != nil {
 				return err
 			}
 		}
@@ -301,11 +375,11 @@ func (c *Config) CompileConfig() error {
 	return nil
 }
 
-func (c Config) IsKindEnabled(kind string) bool {
+func (c *Config) IsKindEnabled(kind string) bool {
 	return !c.C.DisabledKinds[kind]
 }
 
-func (c Config) IsLangDisabled(lang string) bool {
+func (c *Config) IsLangDisabled(lang string) bool {
 	return c.C.DisabledLanguages[lang]
 }
 
@@ -323,10 +397,22 @@ type ConfigCompiled struct {
 	IgnoreFile        func(filename string) bool
 	MainSections      []string
 	Clock             time.Time
+
+	// This is set to the last transient error found during config compilation.
+	// With themes/modules we compute the configuration in multiple passes, and
+	// errors with missing output format definitions may resolve itself.
+	transientErr error
+
+	mu sync.Mutex
 }
 
 // This may be set after the config is compiled.
-func (c *ConfigCompiled) SetMainSections(sections []string) {
+func (c *ConfigCompiled) SetMainSectionsIfNotSet(sections []string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.MainSections != nil {
+		return
+	}
 	c.MainSections = sections
 }
 
@@ -359,10 +445,10 @@ type RootConfig struct {
 	// Copyright information.
 	Copyright string
 
-	// The language to apply to content without any Clolanguage indicator.
+	// The language to apply to content without any language indicator.
 	DefaultContentLanguage string
 
-	// By defefault, we put the default content language in the root and the others below their language ID, e.g. /no/.
+	// By default, we put the default content language in the root and the others below their language ID, e.g. /no/.
 	// Set this to true to put all languages below their language ID.
 	DefaultContentLanguageInSubdir bool
 
@@ -380,6 +466,9 @@ type RootConfig struct {
 
 	// Disable the injection of the Hugo generator tag on the home page.
 	DisableHugoGeneratorInject bool
+
+	// Disable live reloading in server mode.
+	DisableLiveReload bool
 
 	// Enable replacement in Pages' Content of Emoji shortcodes with their equivalent Unicode characters.
 	// <docsmeta>{"identifiers": ["Content", "Unicode"] }</docsmeta>
@@ -419,11 +508,8 @@ type RootConfig struct {
 	// Enable to print greppable placeholders (on the form "[i18n] TRANSLATIONID") for missing translation strings.
 	EnableMissingTranslationPlaceholders bool
 
-	// Enable to print warnings for missing translation strings.
-	LogI18nWarnings bool
-
-	// ENable to print warnings for multiple files published to the same destination.
-	LogPathWarnings bool
+	// Enable to panic on warning log entries. This may make it easier to detect the source.
+	PanicOnWarning bool
 
 	// The configured environment. Default is "development" for server and "production" for build.
 	Environment string
@@ -457,6 +543,12 @@ type RootConfig struct {
 	// Whether to track and print unused templates during the build.
 	PrintUnusedTemplates bool
 
+	// Enable to print warnings for missing translation strings.
+	PrintI18nWarnings bool
+
+	// ENable to print warnings for multiple files published to the same destination.
+	PrintPathWarnings bool
+
 	// URL to be used as a placeholder when a page reference cannot be found in ref or relref. Is used as-is.
 	RefLinksNotFoundURL string
 
@@ -477,7 +569,7 @@ type RootConfig struct {
 	// See Modules for more a more flexible way to load themes.
 	Theme []string
 
-	// Timeout for generating page contents, specified as a duration or in milliseconds.
+	// Timeout for generating page contents, specified as a duration or in seconds.
 	Timeout string
 
 	// The time zone (or location), e.g. Europe/Oslo, used to parse front matter dates without such information and in the time function.
@@ -565,6 +657,16 @@ type Configs struct {
 	configLangs []config.AllProvider
 }
 
+// transientErr returns the last transient error found during config compilation.
+func (c *Configs) transientErr() error {
+	for _, l := range c.LanguageConfigSlice {
+		if l.C.transientErr != nil {
+			return l.C.transientErr
+		}
+	}
+	return nil
+}
+
 func (c *Configs) IsZero() bool {
 	// A config always has at least one language.
 	return c == nil || len(c.Languages) == 0
@@ -590,6 +692,26 @@ func (c *Configs) Init() error {
 		return err
 	}
 
+	// We should consolidate this, but to get a full view of the mounts in e.g. "hugo config" we need to
+	// transfer any default mounts added above to the config used to print the config.
+	for _, m := range c.Modules[0].Mounts() {
+		var found bool
+		for _, cm := range c.Base.Module.Mounts {
+			if cm.Source == m.Source && cm.Target == m.Target && cm.Lang == m.Lang {
+				found = true
+				break
+			}
+		}
+		if !found {
+			c.Base.Module.Mounts = append(c.Base.Module.Mounts, m)
+		}
+	}
+
+	// Transfer the changed mounts to the language versions (all share the same mount set, but can be displayed in different languages).
+	for _, l := range c.LanguageConfigSlice {
+		l.Module.Mounts = c.Base.Module.Mounts
+	}
+
 	return nil
 }
 
@@ -610,8 +732,8 @@ func (c Configs) GetByLang(lang string) config.AllProvider {
 	return nil
 }
 
-// FromLoadConfigResult creates a new Config from res.
-func FromLoadConfigResult(fs afero.Fs, res config.LoadConfigResult) (*Configs, error) {
+// fromLoadConfigResult creates a new Config from res.
+func fromLoadConfigResult(fs afero.Fs, logger loggers.Logger, res config.LoadConfigResult) (*Configs, error) {
 	if !res.Cfg.IsSet("languages") {
 		// We need at least one
 		lang := res.Cfg.GetString("defaultContentLanguage")
@@ -621,7 +743,8 @@ func FromLoadConfigResult(fs afero.Fs, res config.LoadConfigResult) (*Configs, e
 	cfg := res.Cfg
 
 	all := &Config{}
-	err := decodeConfigFromParams(fs, bcfg, cfg, all, nil)
+
+	err := decodeConfigFromParams(fs, logger, bcfg, cfg, all, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -632,7 +755,7 @@ func FromLoadConfigResult(fs afero.Fs, res config.LoadConfigResult) (*Configs, e
 	languagesConfig := cfg.GetStringMap("languages")
 	var isMultiHost bool
 
-	if err := all.CompileConfig(); err != nil {
+	if err := all.CompileConfig(logger); err != nil {
 		return nil, err
 	}
 
@@ -641,14 +764,37 @@ func FromLoadConfigResult(fs afero.Fs, res config.LoadConfigResult) (*Configs, e
 		var differentRootKeys []string
 		switch x := v.(type) {
 		case maps.Params:
+			var params maps.Params
+			pv, found := x["params"]
+			if found {
+				params = pv.(maps.Params)
+			} else {
+				params = maps.Params{
+					maps.MergeStrategyKey: maps.ParamsMergeStrategyDeep,
+				}
+				x["params"] = params
+			}
+
 			for kk, vv := range x {
+				if kk == "_merge" {
+					continue
+				}
+				if kk != maps.MergeStrategyKey && !configLanguageKeys[kk] {
+					// This should have been placed below params.
+					// We accidentally allowed it in the past, so we need to support it a little longer,
+					// But log a warning.
+					if _, found := params[kk]; !found {
+						helpers.Deprecated(fmt.Sprintf("config: languages.%s.%s: custom params on the language top level", k, kk), fmt.Sprintf("Put the value below [languages.%s.params]. See https://gohugo.io/content-management/multilingual/#changes-in-hugo-01120", k), false)
+						params[kk] = vv
+					}
+				}
 				if kk == "baseurl" {
 					// baseURL configure don the language level is a multihost setup.
 					isMultiHost = true
 				}
 				mergedConfig.Set(kk, vv)
-				if cfg.IsSet(kk) {
-					rootv := cfg.Get(kk)
+				rootv := cfg.Get(kk)
+				if rootv != nil && cfg.IsSet(kk) {
 					// This overrides a root key and potentially needs a merge.
 					if !reflect.DeepEqual(rootv, vv) {
 						switch vvv := vv.(type) {
@@ -667,8 +813,13 @@ func FromLoadConfigResult(fs afero.Fs, res config.LoadConfigResult) (*Configs, e
 						}
 					}
 				} else {
-					// Apply new values to the root.
-					differentRootKeys = append(differentRootKeys, "")
+					switch vv.(type) {
+					case maps.Params:
+						differentRootKeys = append(differentRootKeys, kk)
+					default:
+						// Apply new values to the root.
+						differentRootKeys = append(differentRootKeys, "")
+					}
 				}
 			}
 			differentRootKeys = helpers.UniqueStringsSorted(differentRootKeys)
@@ -680,12 +831,14 @@ func FromLoadConfigResult(fs afero.Fs, res config.LoadConfigResult) (*Configs, e
 
 			// Create a copy of the complete config and replace the root keys with the language specific ones.
 			clone := all.cloneForLang()
-			if err := decodeConfigFromParams(fs, bcfg, mergedConfig, clone, differentRootKeys); err != nil {
+
+			if err := decodeConfigFromParams(fs, logger, bcfg, mergedConfig, clone, differentRootKeys); err != nil {
 				return nil, fmt.Errorf("failed to decode config for language %q: %w", k, err)
 			}
-			if err := clone.CompileConfig(); err != nil {
+			if err := clone.CompileConfig(logger); err != nil {
 				return nil, err
 			}
+
 			langConfigMap[k] = clone
 		case maps.ParamsMergeStrategy:
 		default:
@@ -733,6 +886,10 @@ func FromLoadConfigResult(fs afero.Fs, res config.LoadConfigResult) (*Configs, e
 
 	bcfg.PublishDir = all.PublishDir
 	res.BaseConfig = bcfg
+	all.CommonDirs.CacheDir = bcfg.CacheDir
+	for _, l := range langConfigs {
+		l.CommonDirs.CacheDir = bcfg.CacheDir
+	}
 
 	cm := &Configs{
 		Base:                  all,
@@ -747,7 +904,7 @@ func FromLoadConfigResult(fs afero.Fs, res config.LoadConfigResult) (*Configs, e
 	return cm, nil
 }
 
-func decodeConfigFromParams(fs afero.Fs, bcfg config.BaseConfig, p config.Provider, target *Config, keys []string) error {
+func decodeConfigFromParams(fs afero.Fs, logger loggers.Logger, bcfg config.BaseConfig, p config.Provider, target *Config, keys []string) error {
 
 	var decoderSetups []decodeWeight
 
@@ -760,7 +917,7 @@ func decodeConfigFromParams(fs afero.Fs, bcfg config.BaseConfig, p config.Provid
 			if v, found := allDecoderSetups[key]; found {
 				decoderSetups = append(decoderSetups, v)
 			} else {
-				return fmt.Errorf("unknown config key %q", key)
+				logger.Warnf("Skip unknown config key %q", key)
 			}
 		}
 	}
@@ -797,11 +954,11 @@ func createDefaultOutputFormats(allFormats output.Formats) map[string][]string {
 	}
 
 	m := map[string][]string{
-		page.KindPage:     {htmlOut.Name},
-		page.KindHome:     defaultListTypes,
-		page.KindSection:  defaultListTypes,
-		page.KindTerm:     defaultListTypes,
-		page.KindTaxonomy: defaultListTypes,
+		kinds.KindPage:     {htmlOut.Name},
+		kinds.KindHome:     defaultListTypes,
+		kinds.KindSection:  defaultListTypes,
+		kinds.KindTerm:     defaultListTypes,
+		kinds.KindTaxonomy: defaultListTypes,
 	}
 
 	// May be disabled

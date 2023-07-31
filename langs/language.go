@@ -23,6 +23,7 @@ import (
 	"golang.org/x/text/language"
 
 	"github.com/gohugoio/hugo/common/htime"
+	"github.com/gohugoio/hugo/common/maps"
 	"github.com/gohugoio/locales"
 	translators "github.com/gohugoio/localescompressed"
 )
@@ -40,8 +41,14 @@ type Language struct {
 	translator    locales.Translator
 	timeFormatter htime.TimeFormatter
 	tag           language.Tag
-	collator      *Collator
-	location      *time.Location
+	// collator1 and collator2 are the same, we have 2 to prevent deadlocks.
+	collator1 *Collator
+	collator2 *Collator
+
+	location *time.Location
+
+	// This is just an alias of Site.Params.
+	params maps.Params
 }
 
 // NewLanguage creates a new language.
@@ -54,14 +61,20 @@ func NewLanguage(lang, defaultContentLanguage, timeZone string, languageConfig L
 		}
 	}
 
-	var coll *Collator
+	var coll1, coll2 *Collator
 	tag, err := language.Parse(lang)
 	if err == nil {
-		coll = &Collator{
+		coll1 = &Collator{
+			c: collate.New(tag),
+		}
+		coll2 = &Collator{
 			c: collate.New(tag),
 		}
 	} else {
-		coll = &Collator{
+		coll1 = &Collator{
+			c: collate.New(language.English),
+		}
+		coll2 = &Collator{
 			c: collate.New(language.English),
 		}
 	}
@@ -72,11 +85,40 @@ func NewLanguage(lang, defaultContentLanguage, timeZone string, languageConfig L
 		translator:     translator,
 		timeFormatter:  htime.NewTimeFormatter(translator),
 		tag:            tag,
-		collator:       coll,
+		collator1:      coll1,
+		collator2:      coll2,
 	}
 
 	return l, l.loadLocation(timeZone)
+}
 
+// This is injected from hugolib to avoid circular dependencies.
+var DeprecationFunc = func(item, alternative string, err bool) {}
+
+const paramsDeprecationWarning = `.Language.Params is deprecated and will be removed in a future release. Use site.Params instead.
+
+- For all but custom parameters, you need to use the built in Hugo variables, e.g. site.Title, site.LanguageCode; site.Language.Params.Title will not work.
+- All custom parameters needs to be placed below params, e.g. [languages.en.params] in TOML.
+
+See https://gohugo.io/content-management/multilingual/#changes-in-hugo-01120
+
+`
+
+// Params returns the language params.
+// Note that this is the same as the Site.Params, but we keep it here for legacy reasons.
+// Deprecated: Use the site.Params instead.
+func (l *Language) Params() maps.Params {
+	// TODO(bep) Remove this for now as it created a little too much noise. Need to think about this.
+	// See https://github.com/gohugoio/hugo/issues/11025
+	//DeprecationFunc(".Language.Params", paramsDeprecationWarning, false)
+	return l.params
+}
+
+func (l *Language) LanguageCode() string {
+	if l.LanguageConfig.LanguageCode != "" {
+		return l.LanguageConfig.LanguageCode
+	}
+	return l.Lang
 }
 
 func (l *Language) loadLocation(tzStr string) error {
@@ -87,6 +129,10 @@ func (l *Language) loadLocation(tzStr string) error {
 	l.location = location
 
 	return nil
+}
+
+func (l *Language) String() string {
+	return l.Lang
 }
 
 // Languages is a sortable list of languages.
@@ -113,6 +159,10 @@ func (l Languages) AsOrdinalSet() map[string]int {
 // Internal access to unexported Language fields.
 // This construct is to prevent them from leaking to the templates.
 
+func SetParams(l *Language, params maps.Params) {
+	l.params = params
+}
+
 func GetTimeFormatter(l *Language) htime.TimeFormatter {
 	return l.timeFormatter
 }
@@ -125,8 +175,12 @@ func GetLocation(l *Language) *time.Location {
 	return l.location
 }
 
-func GetCollator(l *Language) *Collator {
-	return l.collator
+func GetCollator1(l *Language) *Collator {
+	return l.collator1
+}
+
+func GetCollator2(l *Language) *Collator {
+	return l.collator2
 }
 
 type Collator struct {

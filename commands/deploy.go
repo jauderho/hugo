@@ -52,20 +52,20 @@ documentation.
 			if err != nil {
 				return err
 			}
-			deployer, err := deploy.New(h.Configs.GetFirstLanguageConfig(), h.PathSpec.PublishFs)
+			deployer, err := deploy.New(h.Configs.GetFirstLanguageConfig(), h.Log, h.PathSpec.PublishFs)
 			if err != nil {
 				return err
 			}
 			return deployer.Deploy(ctx)
 		},
-		withc: func(cmd *cobra.Command) {
+		withc: func(cmd *cobra.Command, r *rootCommand) {
 			cmd.Flags().String("target", "", "target deployment from deployments section in config file; defaults to the first one")
 			cmd.Flags().Bool("confirm", false, "ask for confirmation before making changes to the target")
 			cmd.Flags().Bool("dryRun", false, "dry run")
 			cmd.Flags().Bool("force", false, "force upload of all files")
-			cmd.Flags().Bool("invalidateCDN", true, "invalidate the CDN cache listed in the deployment target")
-			cmd.Flags().Int("maxDeletes", 256, "maximum # of files to delete, or -1 to disable")
-			cmd.Flags().Int("workers", 10, "number of workers to transfer files. defaults to 10")
+			cmd.Flags().Bool("invalidateCDN", deploy.DefaultConfig.InvalidateCDN, "invalidate the CDN cache listed in the deployment target")
+			cmd.Flags().Int("maxDeletes", deploy.DefaultConfig.MaxDeletes, "maximum # of files to delete, or -1 to disable")
+			cmd.Flags().Int("workers", deploy.DefaultConfig.Workers, "number of workers to transfer files. defaults to 10")
 		},
 	}
 }

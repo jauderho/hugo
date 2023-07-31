@@ -26,11 +26,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bep/logg"
 	"github.com/bep/simplecobra"
 	"github.com/fsnotify/fsnotify"
 	"github.com/gohugoio/hugo/common/herrors"
 	"github.com/gohugoio/hugo/common/htime"
 	"github.com/gohugoio/hugo/common/hugo"
+	"github.com/gohugoio/hugo/common/loggers"
 	"github.com/gohugoio/hugo/common/maps"
 	"github.com/gohugoio/hugo/common/terminal"
 	"github.com/gohugoio/hugo/common/types"
@@ -50,8 +52,8 @@ import (
 type hugoBuilder struct {
 	r *rootCommand
 
-	cunfMu sync.Mutex
-	conf_  *commonConfig
+	confmu sync.Mutex
+	conf   *commonConfig
 
 	// May be nil.
 	s *serverCommand
@@ -66,22 +68,22 @@ type hugoBuilder struct {
 	onConfigLoaded func(reloaded bool) error
 
 	fastRenderMode     bool
-	buildWatch         bool
 	showErrorInBrowser bool
 
 	errState hugoBuilderErrState
 }
 
-func (c *hugoBuilder) conf() *commonConfig {
-	c.cunfMu.Lock()
-	defer c.cunfMu.Unlock()
-	return c.conf_
+func (c *hugoBuilder) withConfE(fn func(conf *commonConfig) error) error {
+	c.confmu.Lock()
+	defer c.confmu.Unlock()
+	return fn(c.conf)
 }
 
-func (c *hugoBuilder) setConf(conf *commonConfig) {
-	c.cunfMu.Lock()
-	defer c.cunfMu.Unlock()
-	c.conf_ = conf
+func (c *hugoBuilder) withConf(fn func(conf *commonConfig)) {
+	c.confmu.Lock()
+	defer c.confmu.Unlock()
+	fn(c.conf)
+
 }
 
 type hugoBuilderErrState struct {
@@ -128,7 +130,7 @@ func (e *hugoBuilderErrState) wasErr() bool {
 }
 
 func (c *hugoBuilder) errCount() int {
-	return int(c.r.logger.LogCounters().ErrorCounter.Count())
+	return c.r.logger.LoggCount(logg.LevelError) + loggers.Log().LoggCount(logg.LevelError)
 }
 
 // getDirList provides NewWatcher() with a list of directories to watch for changes.
@@ -153,7 +155,11 @@ func (c *hugoBuilder) getDirList() ([]string, error) {
 		return nil
 	}
 
-	watchFiles := c.hugo().PathSpec.BaseFs.WatchDirs()
+	h, err := c.hugo()
+	if err != nil {
+		return nil, err
+	}
+	watchFiles := h.PathSpec.BaseFs.WatchDirs()
 	for _, fi := range watchFiles {
 		if !fi.IsDir() {
 			filenames = append(filenames, fi.Meta().Filename)
@@ -334,7 +340,11 @@ func (c *hugoBuilder) newWatcher(pollIntervalStr string, dirList ...string) (*wa
 		return nil, err
 	}
 
-	spec := c.hugo().Deps.SourceSpec
+	h, err := c.hugo()
+	if err != nil {
+		return nil, err
+	}
+	spec := h.Deps.SourceSpec
 
 	for _, d := range dirList {
 		if d != "" {
@@ -347,9 +357,12 @@ func (c *hugoBuilder) newWatcher(pollIntervalStr string, dirList ...string) (*wa
 
 	// Identifies changes to config (config.toml) files.
 	configSet := make(map[string]bool)
-	configFiles := c.conf().configs.LoadingInfo.ConfigFiles
+	var configFiles []string
+	c.withConf(func(conf *commonConfig) {
+		configFiles = conf.configs.LoadingInfo.ConfigFiles
+	})
 
-	c.r.logger.Println("Watching for config changes in", strings.Join(configFiles, ", "))
+	c.r.Println("Watching for config changes in", strings.Join(configFiles, ", "))
 	for _, configFile := range configFiles {
 		watcher.Add(configFile)
 		configSet[configFile] = true
@@ -359,7 +372,7 @@ func (c *hugoBuilder) newWatcher(pollIntervalStr string, dirList ...string) (*wa
 		for {
 			select {
 			case evs := <-watcher.Events:
-				unlock, err := c.hugo().LockBuild()
+				unlock, err := h.LockBuild()
 				if err != nil {
 					c.r.logger.Errorln("Failed to acquire a build lock: %s", err)
 					return
@@ -399,7 +412,12 @@ func (c *hugoBuilder) build() error {
 
 	if !c.r.quiet {
 		c.r.Println()
-		c.hugo().PrintProcessingStats(os.Stdout)
+		h, err := c.hugo()
+		if err != nil {
+			return err
+		}
+
+		h.PrintProcessingStats(os.Stdout)
 		c.r.Println()
 	}
 
@@ -407,7 +425,11 @@ func (c *hugoBuilder) build() error {
 }
 
 func (c *hugoBuilder) buildSites(noBuildLock bool) (err error) {
-	return c.hugo().Build(hugolib.BuildCfg{NoBuildLock: noBuildLock})
+	h, err := c.hugo()
+	if err != nil {
+		return err
+	}
+	return h.Build(hugolib.BuildCfg{NoBuildLock: noBuildLock})
 }
 
 func (c *hugoBuilder) copyStatic() (map[string]uint64, error) {
@@ -419,6 +441,7 @@ func (c *hugoBuilder) copyStatic() (map[string]uint64, error) {
 }
 
 func (c *hugoBuilder) copyStaticTo(sourceFs *filesystems.SourceFilesystem) (uint64, error) {
+	infol := c.r.logger.InfoCommand("copy static")
 	publishDir := helpers.FilePathSeparator
 
 	if sourceFs.PublishFolder != "" {
@@ -428,23 +451,27 @@ func (c *hugoBuilder) copyStaticTo(sourceFs *filesystems.SourceFilesystem) (uint
 	fs := &countingStatFs{Fs: sourceFs.Fs}
 
 	syncer := fsync.NewSyncer()
-	syncer.NoTimes = c.conf().configs.Base.NoTimes
-	syncer.NoChmod = c.conf().configs.Base.NoChmod
-	syncer.ChmodFilter = chmodFilter
+	c.withConf(func(conf *commonConfig) {
+		syncer.NoTimes = conf.configs.Base.NoTimes
+		syncer.NoChmod = conf.configs.Base.NoChmod
+		syncer.ChmodFilter = chmodFilter
+
+		syncer.DestFs = conf.fs.PublishDirStatic
+		// Now that we are using a unionFs for the static directories
+		// We can effectively clean the publishDir on initial sync
+		syncer.Delete = conf.configs.Base.CleanDestinationDir
+	})
+
 	syncer.SrcFs = fs
-	syncer.DestFs = c.conf().fs.PublishDirStatic
-	// Now that we are using a unionFs for the static directories
-	// We can effectively clean the publishDir on initial sync
-	syncer.Delete = c.conf().configs.Base.CleanDestinationDir
 
 	if syncer.Delete {
-		c.r.logger.Infoln("removing all files from destination that don't exist in static dirs")
+		infol.Logf("removing all files from destination that don't exist in static dirs")
 
 		syncer.DeleteFilter = func(f os.FileInfo) bool {
 			return f.IsDir() && strings.HasPrefix(f.Name(), ".")
 		}
 	}
-	c.r.logger.Infoln("syncing static files to", publishDir)
+	infol.Logf("syncing static files to %s", publishDir)
 
 	// because we are using a baseFs (to get the union right).
 	// set sync src to root
@@ -462,7 +489,11 @@ func (c *hugoBuilder) copyStaticTo(sourceFs *filesystems.SourceFilesystem) (uint
 func (c *hugoBuilder) doWithPublishDirs(f func(sourceFs *filesystems.SourceFilesystem) (uint64, error)) (map[string]uint64, error) {
 	langCount := make(map[string]uint64)
 
-	staticFilesystems := c.hugo().BaseFs.SourceFilesystems.Static
+	h, err := c.hugo()
+	if err != nil {
+		return nil, err
+	}
+	staticFilesystems := h.BaseFs.SourceFilesystems.Static
 
 	if len(staticFilesystems) == 0 {
 		c.r.logger.Infoln("No static directories found to sync")
@@ -476,9 +507,11 @@ func (c *hugoBuilder) doWithPublishDirs(f func(sourceFs *filesystems.SourceFiles
 		}
 		if lang == "" {
 			// Not multihost
-			for _, l := range c.conf().configs.Languages {
-				langCount[l.Lang] = cnt
-			}
+			c.withConf(func(conf *commonConfig) {
+				for _, l := range conf.configs.Languages {
+					langCount[l.Lang] = cnt
+				}
+			})
 		} else {
 			langCount[lang] = cnt
 		}
@@ -493,14 +526,13 @@ func (c *hugoBuilder) fullBuild(noBuildLock bool) error {
 		langCount map[string]uint64
 	)
 
-	if !c.r.quiet {
-		fmt.Println("Start building sites … ")
-		fmt.Println(hugo.BuildVersionString())
-		if terminal.IsTerminal(os.Stdout) {
-			defer func() {
-				fmt.Print(showCursor + clearLine)
-			}()
-		}
+	c.r.logger.Println("Start building sites … ")
+	c.r.logger.Println(hugo.BuildVersionString())
+	c.r.logger.Println()
+	if terminal.IsTerminal(os.Stdout) {
+		defer func() {
+			fmt.Print(showCursor + clearLine)
+		}()
 	}
 
 	copyStaticFunc := func() error {
@@ -520,7 +552,11 @@ func (c *hugoBuilder) fullBuild(noBuildLock bool) error {
 	// Do not copy static files and build sites in parallel if cleanDestinationDir is enabled.
 	// This flag deletes all static resources in /public folder that are missing in /static,
 	// and it does so at the end of copyStatic() call.
-	if c.conf().configs.Base.CleanDestinationDir {
+	var cleanDestinationDir bool
+	c.withConf(func(conf *commonConfig) {
+		cleanDestinationDir = conf.configs.Base.CleanDestinationDir
+	})
+	if cleanDestinationDir {
 		if err := copyStaticFunc(); err != nil {
 			return err
 		}
@@ -535,16 +571,20 @@ func (c *hugoBuilder) fullBuild(noBuildLock bool) error {
 		}
 	}
 
-	for _, s := range c.hugo().Sites {
+	h, err := c.hugo()
+	if err != nil {
+		return err
+	}
+	for _, s := range h.Sites {
 		s.ProcessingStats.Static = langCount[s.Language().Lang]
 	}
 
 	if c.r.gc {
-		count, err := c.hugo().GC()
+		count, err := h.GC()
 		if err != nil {
 			return err
 		}
-		for _, s := range c.hugo().Sites {
+		for _, s := range h.Sites {
 			// We have no way of knowing what site the garbage belonged to.
 			s.ProcessingStats.Cleaned = uint64(count)
 		}
@@ -646,17 +686,18 @@ func (c *hugoBuilder) handleEvents(watcher *watcher.Batcher,
 			}
 
 			if ev.Op&fsnotify.Remove == fsnotify.Remove || ev.Op&fsnotify.Rename == fsnotify.Rename {
-				configFiles := c.conf().configs.LoadingInfo.ConfigFiles
-				for _, configFile := range configFiles {
-					counter := 0
-					for watcher.Add(configFile) != nil {
-						counter++
-						if counter >= 100 {
-							break
+				c.withConf(func(conf *commonConfig) {
+					for _, configFile := range conf.configs.LoadingInfo.ConfigFiles {
+						counter := 0
+						for watcher.Add(configFile) != nil {
+							counter++
+							if counter >= 100 {
+								break
+							}
+							time.Sleep(100 * time.Millisecond)
 						}
-						time.Sleep(100 * time.Millisecond)
 					}
-				}
+				})
 			}
 
 			// Config file(s) changed. Need full rebuild.
@@ -691,12 +732,17 @@ func (c *hugoBuilder) handleEvents(watcher *watcher.Batcher,
 	dynamicEvents := []fsnotify.Event{}
 
 	filtered := []fsnotify.Event{}
+	h, err := c.hugo()
+	if err != nil {
+		c.r.logger.Errorln("Error getting the Hugo object:", err)
+		return
+	}
 	for _, ev := range evs {
-		if c.hugo().ShouldSkipFileChangeEvent(ev) {
+		if h.ShouldSkipFileChangeEvent(ev) {
 			continue
 		}
 		// Check the most specific first, i.e. files.
-		contentMapped := c.hugo().ContentChanges.GetSymbolicLinkMappings(ev.Name)
+		contentMapped := h.ContentChanges.GetSymbolicLinkMappings(ev.Name)
 		if len(contentMapped) > 0 {
 			for _, mapped := range contentMapped {
 				filtered = append(filtered, fsnotify.Event{Name: mapped, Op: ev.Op})
@@ -708,7 +754,7 @@ func (c *hugoBuilder) handleEvents(watcher *watcher.Batcher,
 
 		dir, name := filepath.Split(ev.Name)
 
-		contentMapped = c.hugo().ContentChanges.GetSymbolicLinkMappings(dir)
+		contentMapped = h.ContentChanges.GetSymbolicLinkMappings(dir)
 
 		if len(contentMapped) == 0 {
 			filtered = append(filtered, ev)
@@ -742,7 +788,7 @@ func (c *hugoBuilder) handleEvents(watcher *watcher.Batcher,
 		if istemp {
 			continue
 		}
-		if c.hugo().Deps.SourceSpec.IgnoreFile(ev.Name) {
+		if h.Deps.SourceSpec.IgnoreFile(ev.Name) {
 			continue
 		}
 		// Sometimes during rm -rf operations a '"": REMOVE' is triggered. Just ignore these
@@ -771,7 +817,7 @@ func (c *hugoBuilder) handleEvents(watcher *watcher.Batcher,
 				if err := watcher.Add(path); err != nil {
 					return err
 				}
-			} else if !staticSyncer.isStatic(path) {
+			} else if !staticSyncer.isStatic(h, path) {
 				// Hugo's rebuilding logic is entirely file based. When you drop a new folder into
 				// /content on OSX, the above logic will handle future watching of those files,
 				// but the initial CREATE is lost.
@@ -783,12 +829,14 @@ func (c *hugoBuilder) handleEvents(watcher *watcher.Batcher,
 		// recursively add new directories to watch list
 		// When mkdir -p is used, only the top directory triggers an event (at least on OSX)
 		if ev.Op&fsnotify.Create == fsnotify.Create {
-			if s, err := c.conf().fs.Source.Stat(ev.Name); err == nil && s.Mode().IsDir() {
-				_ = helpers.SymbolicWalk(c.conf().fs.Source, ev.Name, walkAdder)
-			}
+			c.withConf(func(conf *commonConfig) {
+				if s, err := conf.fs.Source.Stat(ev.Name); err == nil && s.Mode().IsDir() {
+					_ = helpers.SymbolicWalk(conf.fs.Source, ev.Name, walkAdder)
+				}
+			})
 		}
 
-		if staticSyncer.isStatic(ev.Name) {
+		if staticSyncer.isStatic(h, ev.Name) {
 			staticEvents = append(staticEvents, ev)
 		} else {
 			dynamicEvents = append(dynamicEvents, ev)
@@ -818,7 +866,11 @@ func (c *hugoBuilder) handleEvents(watcher *watcher.Batcher,
 			// force refresh when more than one file
 			if !c.errState.wasErr() && len(staticEvents) == 1 {
 				ev := staticEvents[0]
-				h := c.hugo()
+				h, err := c.hugo()
+				if err != nil {
+					c.r.logger.Errorln("Error getting the Hugo object:", err)
+					return
+				}
 				path := h.BaseFs.SourceFilesystems.MakeStaticPathRelative(ev.Name)
 				path = h.RelURL(helpers.ToSlashTrimLeading(path), false)
 
@@ -831,7 +883,7 @@ func (c *hugoBuilder) handleEvents(watcher *watcher.Batcher,
 
 	if len(dynamicEvents) > 0 {
 		partitionedEvents := partitionDynamicEvents(
-			c.hugo().BaseFs.SourceFilesystems,
+			h.BaseFs.SourceFilesystems,
 			dynamicEvents)
 
 		onePageName := pickOneWriteOrCreatePath(partitionedEvents.ContentEvents)
@@ -857,7 +909,7 @@ func (c *hugoBuilder) handleEvents(watcher *watcher.Batcher,
 					// Nothing has changed.
 					return
 				} else if len(changed) == 1 {
-					pathToRefresh := c.hugo().PathSpec.RelURL(helpers.ToSlashTrimLeading(changed[0]), false)
+					pathToRefresh := h.PathSpec.RelURL(helpers.ToSlashTrimLeading(changed[0]), false)
 					livereload.RefreshPath(pathToRefresh)
 				} else {
 					livereload.ForceRefresh()
@@ -872,7 +924,7 @@ func (c *hugoBuilder) handleEvents(watcher *watcher.Batcher,
 
 				if navigate {
 					if onePageName != "" {
-						p = c.hugo().GetContentPage(onePageName)
+						p = h.GetContentPage(onePageName)
 					}
 				}
 
@@ -886,22 +938,31 @@ func (c *hugoBuilder) handleEvents(watcher *watcher.Batcher,
 	}
 }
 
-func (c *hugoBuilder) hugo() *hugolib.HugoSites {
-	h, err := c.r.HugFromConfig(c.conf())
-	if err != nil {
-		panic(err)
+func (c *hugoBuilder) hugo() (*hugolib.HugoSites, error) {
+	var h *hugolib.HugoSites
+	if err := c.withConfE(func(conf *commonConfig) error {
+		var err error
+		h, err = c.r.HugFromConfig(conf)
+		return err
+
+	}); err != nil {
+		return nil, err
 	}
+
 	if c.s != nil {
 		// A running server, register the media types.
 		for _, s := range h.Sites {
 			s.RegisterMediaTypes()
 		}
 	}
-	return h
+	return h, nil
 }
 
 func (c *hugoBuilder) hugoTry() *hugolib.HugoSites {
-	h, _ := c.r.HugFromConfig(c.conf())
+	var h *hugolib.HugoSites
+	c.withConf(func(conf *commonConfig) {
+		h, _ = c.r.HugFromConfig(conf)
+	})
 	return h
 }
 
@@ -909,19 +970,40 @@ func (c *hugoBuilder) loadConfig(cd *simplecobra.Commandeer, running bool) error
 	cfg := config.New()
 	cfg.Set("renderToDisk", (c.s == nil && !c.r.renderToMemory) || (c.s != nil && c.s.renderToDisk))
 	watch := c.r.buildWatch || (c.s != nil && c.s.serverWatch)
+	if c.r.environment == "" {
+		// We need to set the environment as early as possible because we need it to load the correct config.
+		// Check if the user has set it in env.
+		if env := os.Getenv("HUGO_ENVIRONMENT"); env != "" {
+			c.r.environment = env
+		} else if env := os.Getenv("HUGO_ENV"); env != "" {
+			c.r.environment = env
+		} else {
+			if c.s != nil {
+				// The server defaults to development.
+				c.r.environment = hugo.EnvironmentDevelopment
+			} else {
+				c.r.environment = hugo.EnvironmentProduction
+			}
+		}
+	}
 	cfg.Set("environment", c.r.environment)
 
 	cfg.Set("internal", maps.Params{
 		"running": running,
 		"watch":   watch,
-		"verbose": c.r.verbose,
+		"verbose": c.r.isVerbose(),
 	})
 
 	conf, err := c.r.ConfigFromProvider(c.r.configVersionID.Load(), flagsToCfg(cd, cfg))
 	if err != nil {
 		return err
 	}
-	c.setConf(conf)
+
+	if len(conf.configs.LoadingInfo.ConfigFiles) == 0 {
+		return errors.New("Unable to locate config file or config directory. Perhaps you need to create a new site.\nRun `hugo help new` for details.")
+	}
+
+	c.conf = conf
 	if c.onConfigLoaded != nil {
 		if err := c.onConfigLoaded(false); err != nil {
 			return err
@@ -953,17 +1035,22 @@ func (c *hugoBuilder) rebuildSites(events []fsnotify.Event) error {
 	}
 	c.errState.setBuildErr(nil)
 	visited := c.visitedURLs.PeekAllSet()
-	h := c.hugo()
+	h, err := c.hugo()
+	if err != nil {
+		return err
+	}
 	if c.fastRenderMode {
-		// Make sure we always render the home pages
-		for _, l := range c.conf().configs.Languages {
-			langPath := h.GetLangSubDir(l.Lang)
-			if langPath != "" {
-				langPath = langPath + "/"
+		c.withConf(func(conf *commonConfig) {
+			// Make sure we always render the home pages
+			for _, l := range conf.configs.ConfigLangs() {
+				langPath := l.LanguagePrefix()
+				if langPath != "" {
+					langPath = langPath + "/"
+				}
+				home := h.PrependBasePath("/"+langPath, false)
+				visited[home] = true
 			}
-			home := h.PrependBasePath("/"+langPath, false)
-			visited[home] = true
-		}
+		})
 	}
 	return h.Build(hugolib.BuildCfg{NoBuildLock: true, RecentlyVisited: visited, ErrRecovery: c.errState.wasErr()}, events...)
 }
@@ -971,18 +1058,25 @@ func (c *hugoBuilder) rebuildSites(events []fsnotify.Event) error {
 func (c *hugoBuilder) reloadConfig() error {
 	c.r.Reset()
 	c.r.configVersionID.Add(1)
-	oldConf := c.conf()
-	conf, err := c.r.ConfigFromConfig(c.r.configVersionID.Load(), c.conf())
-	if err != nil {
+
+	if err := c.withConfE(func(conf *commonConfig) error {
+		oldConf := conf
+		newConf, err := c.r.ConfigFromConfig(c.r.configVersionID.Load(), conf)
+		if err != nil {
+			return err
+		}
+		sameLen := len(oldConf.configs.Languages) == len(newConf.configs.Languages)
+		if !sameLen {
+			if oldConf.configs.IsMultihost || newConf.configs.IsMultihost {
+				return errors.New("multihost change detected, please restart server")
+			}
+		}
+		c.conf = newConf
+		return nil
+	}); err != nil {
 		return err
 	}
-	sameLen := len(oldConf.configs.Languages) == len(conf.configs.Languages)
-	if !sameLen {
-		if oldConf.configs.IsMultihost || conf.configs.IsMultihost {
-			return errors.New("multihost change detected, please restart server")
-		}
-	}
-	c.setConf(conf)
+
 	if c.onConfigLoaded != nil {
 		if err := c.onConfigLoaded(true); err != nil {
 			return err

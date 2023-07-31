@@ -29,9 +29,9 @@ import (
 	"github.com/gohugoio/hugo/hugofs/glob"
 
 	"github.com/gohugoio/hugo/common/herrors"
+	"github.com/gohugoio/hugo/common/loggers"
 	"github.com/gohugoio/hugo/common/types"
 
-	"github.com/gohugoio/hugo/common/loggers"
 	"github.com/rogpeppe/go-internal/lockedfile"
 
 	"github.com/gohugoio/hugo/hugofs/files"
@@ -75,6 +75,8 @@ type BaseFs struct {
 	WorkDir afero.Fs
 
 	theBigFs *filesystemsCollector
+
+	workingDir string
 
 	// Locks.
 	buildMu Lockable // <project>/.hugo_build.lock
@@ -201,6 +203,27 @@ func (fs *BaseFs) ResolveJSConfigFile(name string) string {
 	return ""
 }
 
+// MakePathRelative creates a relative path from the given filename.
+// It returns both the component name (e.g. layouts) and the path relative to that.
+func (fs *BaseFs) MakePathRelative(filename string) (string, string) {
+	for _, sfs := range fs.FileSystems() {
+		if sfs.Contains(filename) {
+			if s, found := sfs.MakePathRelative(filename); found {
+				return sfs.Name, s
+			}
+		}
+	}
+	// May be a static file.
+	if s := fs.MakeStaticPathRelative(filename); s != "" {
+		return files.ComponentFolderStatic, s
+	}
+	// Fall back to relative to the working dir.
+	if strings.HasPrefix(filename, fs.workingDir) {
+		return "", strings.TrimPrefix(filename, fs.workingDir)
+	}
+	return "", ""
+}
+
 // SourceFilesystems contains the different source file systems. These can be
 // composite file systems (theme and project etc.), and they have all root
 // set to the source type the provides: data, i18n, static, layouts.
@@ -235,6 +258,7 @@ type SourceFilesystems struct {
 func (s *SourceFilesystems) FileSystems() []*SourceFilesystem {
 	return []*SourceFilesystem{
 		s.Content,
+		s.Assets,
 		s.Data,
 		s.I18n,
 		s.Layouts,
@@ -447,7 +471,7 @@ var counter int
 func NewBase(p *paths.Paths, logger loggers.Logger, options ...func(*BaseFs) error) (*BaseFs, error) {
 	fs := p.Fs
 	if logger == nil {
-		logger = loggers.NewWarningLogger()
+		logger = loggers.NewDefault()
 	}
 
 	publishFs := hugofs.NewBaseFileDecorator(fs.PublishDir)
@@ -466,6 +490,7 @@ func NewBase(p *paths.Paths, logger loggers.Logger, options ...func(*BaseFs) err
 		WorkDir:         fs.WorkingDirReadOnly,
 		PublishFs:       publishFs,
 		PublishFsStatic: publishFsStatic,
+		workingDir:      p.Cfg.BaseConfig().WorkingDir,
 		buildMu:         buildMu,
 	}
 

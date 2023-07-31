@@ -299,7 +299,7 @@ func (c *collector) add(owner *moduleAdapter, moduleImport Import, disabled bool
 					return nil, nil
 				}
 				if found, _ := afero.Exists(c.fs, moduleDir); !found {
-					c.err = c.wrapModuleNotFound(fmt.Errorf(`module %q not found in % q; either add it as a Hugo Module or store it in %q.`, modulePath, moduleDir, c.ccfg.ThemesDir))
+					c.err = c.wrapModuleNotFound(fmt.Errorf(`module %q not found in %q; either add it as a Hugo Module or store it in %q.`, modulePath, moduleDir, c.ccfg.ThemesDir))
 					return nil, nil
 				}
 			}
@@ -347,7 +347,7 @@ func (c *collector) addAndRecurse(owner *moduleAdapter, disabled bool) error {
 	moduleConfig := owner.Config()
 	if owner.projectMod {
 		if err := c.applyMounts(Import{}, owner); err != nil {
-			return fmt.Errorf("failed to apply mounts for project module: %w", err)
+			return fmt.Errorf("failed to apply mounts for project: %w", err)
 		}
 	}
 
@@ -664,7 +664,21 @@ func (c *collector) normalizeMounts(owner *moduleAdapter, mounts []Mount) ([]Mou
 		// Verify that Source exists
 		_, err := c.fs.Stat(sourceDir)
 		if err != nil {
-			continue
+			if strings.HasSuffix(sourceDir, files.FilenameHugoStatsJSON) {
+				// A common pattern for Tailwind 3 is to mount that file to get it on the server watch list.
+
+				// A common pattern is also to add hugo_stats.json to .gitignore.
+
+				// Create an empty file.
+				f, err := c.fs.Create(sourceDir)
+				if err != nil {
+					return nil, fmt.Errorf("%s: %q", errMsg, err)
+				}
+				f.Close()
+			} else {
+				continue
+			}
+
 		}
 
 		// Verify that target points to one of the predefined component dirs

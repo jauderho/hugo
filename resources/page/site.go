@@ -35,7 +35,13 @@ type Site interface {
 	// Returns the Language configured for this Site.
 	Language() *langs.Language
 
+	// Returns all the languages configured for all sites.
+	Languages() langs.Languages
+
 	GetPage(ref ...string) (Page, error)
+
+	// AllPages returns all pages for all languages.
+	AllPages() Pages
 
 	// Returns all the regular Pages in this Site.
 	RegularPages() Pages
@@ -59,6 +65,7 @@ type Site interface {
 	Title() string
 
 	// Returns the configured language code for this Site.
+	// Deprecated: Use .Language.LanguageCode instead.
 	LanguageCode() string
 
 	// Returns the configured copyright information for this Site.
@@ -91,6 +98,9 @@ type Site interface {
 	// Returns the Params configured for this site.
 	Params() maps.Params
 
+	// Param is a convenience method to do lookups in Params.
+	Param(key any) (any, error)
+
 	// Returns a map of all the data inside /data.
 	Data() map[string]any
 
@@ -104,6 +114,9 @@ type Site interface {
 	// Author is deprecated and will be removed in a future release.
 	Author() map[string]interface{}
 
+	// Authors is deprecated and will be removed in a future release.
+	Authors() AuthorList
+
 	// Returns the social links for this site.
 	Social() map[string]string
 
@@ -115,6 +128,18 @@ type Site interface {
 
 	// For internal use only.
 	GetPageWithTemplateInfo(info tpl.Info, ref ...string) (Page, error)
+
+	// BuildDrafts is deprecated and will be removed in a future release.
+	BuildDrafts() bool
+
+	// IsMultiLingual reports whether this site is configured with more than one language.
+	IsMultiLingual() bool
+
+	// LanguagePrefix returns the language prefix for this site.
+	LanguagePrefix() string
+
+	// Deprecated. Use site.Home.OutputFormats.Get "rss" instead.
+	RSSLink() template.URL
 }
 
 // Sites represents an ordered list of sites (languages).
@@ -146,6 +171,9 @@ func (s *siteWrapper) Social() map[string]string {
 func (s *siteWrapper) Author() map[string]interface{} {
 	return s.s.Author()
 }
+func (s *siteWrapper) Authors() AuthorList {
+	return AuthorList{}
+}
 
 func (s *siteWrapper) GoogleAnalytics() string {
 	return s.s.GoogleAnalytics()
@@ -157,6 +185,14 @@ func (s *siteWrapper) GetPage(ref ...string) (Page, error) {
 
 func (s *siteWrapper) Language() *langs.Language {
 	return s.s.Language()
+}
+
+func (s *siteWrapper) Languages() langs.Languages {
+	return s.s.Languages()
+}
+
+func (s *siteWrapper) AllPages() Pages {
+	return s.s.AllPages()
 }
 
 func (s *siteWrapper) RegularPages() Pages {
@@ -235,6 +271,10 @@ func (s *siteWrapper) Params() maps.Params {
 	return s.s.Params()
 }
 
+func (s *siteWrapper) Param(key any) (any, error) {
+	return s.s.Param(key)
+}
+
 func (s *siteWrapper) Data() map[string]any {
 	return s.s.Data()
 }
@@ -247,8 +287,24 @@ func (s *siteWrapper) GetPageWithTemplateInfo(info tpl.Info, ref ...string) (Pag
 	return s.s.GetPageWithTemplateInfo(info, ref...)
 }
 
+func (s *siteWrapper) BuildDrafts() bool {
+	return s.s.BuildDrafts()
+}
+
+func (s *siteWrapper) IsMultiLingual() bool {
+	return s.s.IsMultiLingual()
+}
+
 func (s *siteWrapper) DisqusShortname() string {
 	return s.s.DisqusShortname()
+}
+
+func (s *siteWrapper) LanguagePrefix() string {
+	return s.s.LanguagePrefix()
+}
+
+func (s *siteWrapper) RSSLink() template.URL {
+	return s.s.RSSLink()
 }
 
 type testSite struct {
@@ -258,6 +314,9 @@ type testSite struct {
 
 func (s testSite) Author() map[string]interface{} {
 	return nil
+}
+func (s testSite) Authors() AuthorList {
+	return AuthorList{}
 }
 
 func (s testSite) Social() map[string]string {
@@ -304,6 +363,14 @@ func (t testSite) Current() Site {
 	return t
 }
 
+func (s testSite) LanguagePrefix() string {
+	return ""
+}
+
+func (t testSite) Languages() langs.Languages {
+	return nil
+}
+
 func (t testSite) GoogleAnalytics() string {
 	return ""
 }
@@ -329,6 +396,10 @@ func (t testSite) Home() Page {
 }
 
 func (t testSite) Pages() Pages {
+	return nil
+}
+
+func (t testSite) AllPages() Pages {
 	return nil
 }
 
@@ -368,10 +439,26 @@ func (testSite) DisqusShortname() string {
 	return ""
 }
 
+func (s testSite) BuildDrafts() bool {
+	return false
+}
+
+func (s testSite) IsMultiLingual() bool {
+	return false
+}
+
+func (s testSite) Param(key any) (any, error) {
+	return nil, nil
+}
+
+func (s testSite) RSSLink() template.URL {
+	return ""
+}
+
 // NewDummyHugoSite creates a new minimal test site.
-func NewDummyHugoSite(cfg config.Provider) Site {
+func NewDummyHugoSite(conf config.AllProvider) Site {
 	return testSite{
-		h: hugo.NewInfo(hugo.EnvironmentProduction, nil),
+		h: hugo.NewInfo(conf, nil),
 		l: &langs.Language{
 			Lang: "en",
 		},

@@ -61,6 +61,9 @@ This command is marked as 'Experimental'. We think it's a great idea, so it's no
 removed from Hugo, but we need to test this out in "real life" to get a feel of it,
 so this may/will change in future versions of Hugo.
 `,
+				withc: func(cmd *cobra.Command, r *rootCommand) {
+					applyLocalFlagsBuildConfig(cmd, r)
+				},
 				run: func(ctx context.Context, cd *simplecobra.Commandeer, r *rootCommand, args []string) error {
 					h, err := r.Hugo(flagsToCfg(cd, nil))
 					if err != nil {
@@ -85,6 +88,9 @@ so this may/will change in future versions of Hugo.
 	Note that Hugo Modules supports multi-module projects, so you can initialize a Hugo Module
 	inside a subfolder on GitHub, as one example.
 	`,
+				withc: func(cmd *cobra.Command, r *rootCommand) {
+					applyLocalFlagsBuildConfig(cmd, r)
+				},
 				run: func(ctx context.Context, cd *simplecobra.Commandeer, r *rootCommand, args []string) error {
 					h, err := r.Hugo(flagsToCfg(cd, nil))
 					if err != nil {
@@ -101,7 +107,8 @@ so this may/will change in future versions of Hugo.
 				name:  "verify",
 				short: "Verify dependencies.",
 				long:  `Verify checks that the dependencies of the current module, which are stored in a local downloaded source cache, have not been modified since being downloaded.`,
-				withc: func(cmd *cobra.Command) {
+				withc: func(cmd *cobra.Command, r *rootCommand) {
+					applyLocalFlagsBuildConfig(cmd, r)
 					cmd.Flags().BoolVarP(&clean, "clean", "", false, "delete module cache for dependencies that fail verification")
 				},
 				run: func(ctx context.Context, cd *simplecobra.Commandeer, r *rootCommand, args []string) error {
@@ -119,7 +126,8 @@ so this may/will change in future versions of Hugo.
 				long: `Print a module dependency graph with information about module status (disabled, vendored).
 Note that for vendored modules, that is the version listed and not the one from go.mod.
 `,
-				withc: func(cmd *cobra.Command) {
+				withc: func(cmd *cobra.Command, r *rootCommand) {
+					applyLocalFlagsBuildConfig(cmd, r)
 					cmd.Flags().BoolVarP(&clean, "clean", "", false, "delete module cache for dependencies that fail verification")
 				},
 				run: func(ctx context.Context, cd *simplecobra.Commandeer, r *rootCommand, args []string) error {
@@ -135,7 +143,8 @@ Note that for vendored modules, that is the version listed and not the one from 
 				name:  "clean",
 				short: "Delete the Hugo Module cache for the current project.",
 				long:  `Delete the Hugo Module cache for the current project.`,
-				withc: func(cmd *cobra.Command) {
+				withc: func(cmd *cobra.Command, r *rootCommand) {
+					applyLocalFlagsBuildConfig(cmd, r)
 					cmd.Flags().StringVarP(&pattern, "pattern", "", "", `pattern matching module paths to clean (all if not set), e.g. "**hugo*"`)
 					cmd.Flags().BoolVarP(&all, "all", "", false, "clean entire module cache")
 				},
@@ -157,6 +166,9 @@ Note that for vendored modules, that is the version listed and not the one from 
 			&simpleCommand{
 				name:  "tidy",
 				short: "Remove unused entries in go.mod and go.sum.",
+				withc: func(cmd *cobra.Command, r *rootCommand) {
+					applyLocalFlagsBuildConfig(cmd, r)
+				},
 				run: func(ctx context.Context, cd *simplecobra.Commandeer, r *rootCommand, args []string) error {
 					h, err := r.Hugo(flagsToCfg(cd, nil))
 					if err != nil {
@@ -171,6 +183,9 @@ Note that for vendored modules, that is the version listed and not the one from 
 				long: `Vendor all module dependencies into the _vendor directory.
 	If a module is vendored, that is where Hugo will look for it's dependencies.
 	`,
+				withc: func(cmd *cobra.Command, r *rootCommand) {
+					applyLocalFlagsBuildConfig(cmd, r)
+				},
 				run: func(ctx context.Context, cd *simplecobra.Commandeer, r *rootCommand, args []string) error {
 					h, err := r.Hugo(flagsToCfg(cd, nil))
 					if err != nil {
@@ -203,13 +218,13 @@ Install the latest versions of all module dependencies:
 
 Run "go help get" for more information. All flags available for "go get" is also relevant here.
 ` + commonUsageMod,
-				withc: func(cmd *cobra.Command) {
+				withc: func(cmd *cobra.Command, r *rootCommand) {
 					cmd.DisableFlagParsing = true
 				},
 				run: func(ctx context.Context, cd *simplecobra.Commandeer, r *rootCommand, args []string) error {
 					// We currently just pass on the flags we get to Go and
 					// need to do the flag handling manually.
-					if len(args) == 1 && args[0] == "-h" {
+					if len(args) == 1 && (args[0] == "-h" || args[0] == "--help") {
 						return errHelp
 					}
 
@@ -293,7 +308,8 @@ func (c *modCommands) Run(ctx context.Context, cd *simplecobra.Commandeer, args 
 	return nil
 }
 
-func (c *modCommands) WithCobraCommand(cmd *cobra.Command) error {
+func (c *modCommands) Init(cd *simplecobra.Commandeer) error {
+	cmd := cd.CobraCommand
 	cmd.Short = "Various Hugo Modules helpers."
 	cmd.Long = `Various helpers to help manage the modules in your project's dependency graph.
 Most operations here requires a Go version installed on your system (>= Go 1.12) and the relevant VCS client (typically Git).
@@ -304,7 +320,7 @@ This is not needed if you only operate on modules inside /themes or if you have 
 	return nil
 }
 
-func (c *modCommands) Init(cd, runner *simplecobra.Commandeer) error {
+func (c *modCommands) PreRun(cd, runner *simplecobra.Commandeer) error {
 	c.r = cd.Root.Command.(*rootCommand)
 	return nil
 }

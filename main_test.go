@@ -17,8 +17,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -50,6 +50,7 @@ func TestUnfinished(t *testing.T) {
 
 	p := commonTestScriptsParam
 	p.Dir = "testscripts/unfinished"
+	//p.UpdateScripts = true
 
 	testscript.Run(t, p)
 }
@@ -132,6 +133,11 @@ var commonTestScriptsParam = testscript.Params{
 			if err != nil {
 				ts.Fatalf("%v", err)
 			}
+			if len(fis) == 0 {
+				// To simplify empty dir checks.
+				fmt.Fprintln(ts.Stdout(), "Empty dir")
+				return
+			}
 			for _, fi := range fis {
 				fmt.Fprintf(ts.Stdout(), "%s %04o %s %s\n", fi.Mode(), fi.Mode().Perm(), fi.ModTime().Format(time.RFC3339Nano), fi.Name())
 			}
@@ -198,7 +204,7 @@ var commonTestScriptsParam = testscript.Params{
 				}
 
 				defer resp.Body.Close()
-				body, err := ioutil.ReadAll(resp.Body)
+				body, err := io.ReadAll(resp.Body)
 				if err != nil {
 					return fmt.Errorf("failed to read response body: %v", err)
 				}
@@ -365,11 +371,29 @@ var commonTestScriptsParam = testscript.Params{
 }
 
 func testSetupFunc() func(env *testscript.Env) error {
+	sourceDir, _ := os.Getwd()
 	return func(env *testscript.Env) error {
 		var keyVals []string
 		keyVals = append(keyVals, "HUGO_TESTRUN", "true")
-		hugoCachedDir := filepath.Join(env.WorkDir, "hugocache")
-		keyVals = append(keyVals, "HUGO_CACHEDIR", hugoCachedDir)
+		keyVals = append(keyVals, "HUGO_CACHEDIR", filepath.Join(env.WorkDir, "hugocache"))
+		xdghome := filepath.Join(env.WorkDir, "xdgcachehome")
+		keyVals = append(keyVals, "XDG_CACHE_HOME", xdghome)
+		home := filepath.Join(env.WorkDir, "home")
+		keyVals = append(keyVals, "HOME", home)
+
+		if runtime.GOOS == "darwin" {
+			if err := os.MkdirAll(filepath.Join(home, "Library", "Caches"), 0777); err != nil {
+				return err
+			}
+		}
+
+		if runtime.GOOS == "linux" {
+			if err := os.MkdirAll(xdghome, 0777); err != nil {
+				return err
+			}
+		}
+
+		keyVals = append(keyVals, "SOURCE", sourceDir)
 
 		goVersion := runtime.Version()
 		// Strip all but the major and minor version.

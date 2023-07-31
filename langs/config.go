@@ -14,6 +14,8 @@
 package langs
 
 import (
+	"errors"
+
 	"github.com/gohugoio/hugo/common/maps"
 	"github.com/mitchellh/mapstructure"
 )
@@ -23,6 +25,9 @@ import (
 type LanguageConfig struct {
 	// The language name, e.g. "English".
 	LanguageName string
+
+	// The language code, e.g. "en-US".
+	LanguageCode string
 
 	// The language title. When set, this will
 	// override site.Title for this language.
@@ -34,6 +39,9 @@ type LanguageConfig struct {
 	// The language weight. When set to a non-zero value, this will
 	// be the main sort criteria for the language.
 	Weight int
+
+	// Set to true to disable this language.
+	Disabled bool
 }
 
 func DecodeConfig(m map[string]any) (map[string]LanguageConfig, error) {
@@ -42,6 +50,9 @@ func DecodeConfig(m map[string]any) (map[string]LanguageConfig, error) {
 
 	if err := mapstructure.WeakDecode(m, &langs); err != nil {
 		return nil, err
+	}
+	if len(langs) == 0 {
+		return nil, errors.New("no languages configured")
 	}
 	return langs, nil
 }

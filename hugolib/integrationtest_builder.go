@@ -13,7 +13,7 @@ import (
 	"sync"
 	"testing"
 
-	jww "github.com/spf13/jwalterweatherman"
+	"github.com/bep/logg"
 
 	qt "github.com/frankban/quicktest"
 	"github.com/fsnotify/fsnotify"
@@ -137,6 +137,24 @@ func (s *IntegrationTestBuilder) AssertBuildCountTranslations(count int) {
 	s.Assert(s.H.init.translations.InitCount(), qt.Equals, count)
 }
 
+func (s *IntegrationTestBuilder) AssertFileCount(dirname string, expected int) {
+	s.Helper()
+	fs := s.fs.WorkingDirReadOnly
+	count := 0
+	afero.Walk(fs, dirname, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		count++
+		return nil
+	})
+	s.Assert(count, qt.Equals, expected)
+
+}
+
 func (s *IntegrationTestBuilder) AssertFileContent(filename string, matches ...string) {
 	s.Helper()
 	content := strings.TrimSpace(s.FileContent(filename))
@@ -145,6 +163,15 @@ func (s *IntegrationTestBuilder) AssertFileContent(filename string, matches ...s
 		for _, match := range lines {
 			match = strings.TrimSpace(match)
 			if match == "" || strings.HasPrefix(match, "#") {
+				continue
+			}
+			var negate bool
+			if strings.HasPrefix(match, "! ") {
+				negate = true
+				match = strings.TrimPrefix(match, "! ")
+			}
+			if negate {
+				s.Assert(content, qt.Not(qt.Contains), match, qt.Commentf(m))
 				continue
 			}
 			s.Assert(content, qt.Contains, match, qt.Commentf(m))
@@ -205,6 +232,10 @@ func (s *IntegrationTestBuilder) Build() *IntegrationTestBuilder {
 	return s
 }
 
+func (s *IntegrationTestBuilder) LogString() string {
+	return s.logBuff.String()
+}
+
 func (s *IntegrationTestBuilder) BuildE() (*IntegrationTestBuilder, error) {
 	s.Helper()
 	if err := s.initBuilder(); err != nil {
@@ -213,6 +244,14 @@ func (s *IntegrationTestBuilder) BuildE() (*IntegrationTestBuilder, error) {
 
 	err := s.build(s.Cfg.BuildCfg)
 	return s, err
+}
+
+func (s *IntegrationTestBuilder) Init() *IntegrationTestBuilder {
+	if err := s.initBuilder(); err != nil {
+		s.Fatalf("Failed to init builder: %s", err)
+	}
+	return s
+
 }
 
 type IntegrationTestDebugConfig struct {
@@ -292,17 +331,25 @@ func (s *IntegrationTestBuilder) initBuilder() error {
 		}
 
 		if s.Cfg.LogLevel == 0 {
-			s.Cfg.LogLevel = jww.LevelWarn
+			s.Cfg.LogLevel = logg.LevelWarn
 		}
 
-		logger := loggers.NewBasicLoggerForWriter(s.Cfg.LogLevel, &s.logBuff)
-
 		isBinaryRe := regexp.MustCompile(`^(.*)(\.png|\.jpg)$`)
+
+		const dataSourceFilenamePrefix = "sourcefilename:"
 
 		for _, f := range s.data.Files {
 			filename := filepath.Join(s.Cfg.WorkingDir, f.Name)
 			data := bytes.TrimSuffix(f.Data, []byte("\n"))
-			if isBinaryRe.MatchString(filename) {
+			datastr := strings.TrimSpace(string(data))
+			if strings.HasPrefix(datastr, dataSourceFilenamePrefix) {
+				// Read from file relative to tue current dir.
+				var err error
+				wd, _ := os.Getwd()
+				filename := filepath.Join(wd, strings.TrimSpace(strings.TrimPrefix(datastr, dataSourceFilenamePrefix)))
+				data, err = os.ReadFile(filename)
+				s.Assert(err, qt.IsNil)
+			} else if isBinaryRe.MatchString(filename) {
 				var err error
 				data, err = base64.StdEncoding.DecodeString(string(data))
 				s.Assert(err, qt.IsNil)
@@ -327,12 +374,24 @@ func (s *IntegrationTestBuilder) initBuilder() error {
 		if s.Cfg.Running {
 			flags.Set("internal", maps.Params{
 				"running": s.Cfg.Running,
+				"watch":   s.Cfg.Running,
 			})
 		}
 
 		if s.Cfg.WorkingDir != "" {
 			flags.Set("workingDir", s.Cfg.WorkingDir)
 		}
+
+		w := &s.logBuff
+
+		logger := loggers.New(
+			loggers.Options{
+				Stdout:   w,
+				Stderr:   w,
+				Level:    s.Cfg.LogLevel,
+				Distinct: true,
+			},
+		)
 
 		res, err := allconfig.LoadConfig(
 			allconfig.ConfigSourceDescriptor{
@@ -353,7 +412,7 @@ func (s *IntegrationTestBuilder) initBuilder() error {
 
 		s.Assert(err, qt.IsNil)
 
-		depsCfg := deps.DepsCfg{Configs: res, Fs: fs, Logger: logger}
+		depsCfg := deps.DepsCfg{Configs: res, Fs: fs, LogLevel: logger.Level(), LogOut: logger.Out()}
 		sites, err := NewHugoSites(depsCfg)
 		if err != nil {
 			initErr = err
@@ -372,7 +431,8 @@ func (s *IntegrationTestBuilder) initBuilder() error {
 			s.Assert(os.Chdir(s.Cfg.WorkingDir), qt.IsNil)
 			s.C.Cleanup(func() { os.Chdir(wd) })
 			sc := security.DefaultConfig
-			sc.Exec.Allow = security.NewWhitelist("npm")
+			sc.Exec.Allow, err = security.NewWhitelist("npm")
+			s.Assert(err, qt.IsNil)
 			ex := hexec.New(sc)
 			command, err := ex.New("npm", "install")
 			s.Assert(err, qt.IsNil)
@@ -517,7 +577,7 @@ type IntegrationTestConfig struct {
 	// Will print the log buffer after the build
 	Verbose bool
 
-	LogLevel jww.Threshold
+	LogLevel logg.Level
 
 	// Whether it needs the real file system (e.g. for js.Build tests).
 	NeedsOsFS bool

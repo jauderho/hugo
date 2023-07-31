@@ -45,7 +45,7 @@ to use JSON for the front matter.`,
 				run: func(ctx context.Context, cd *simplecobra.Commandeer, r *rootCommand, args []string) error {
 					return c.convertContents(metadecoders.JSON)
 				},
-				withc: func(cmd *cobra.Command) {
+				withc: func(cmd *cobra.Command, r *rootCommand) {
 				},
 			},
 			&simpleCommand{
@@ -56,7 +56,7 @@ to use TOML for the front matter.`,
 				run: func(ctx context.Context, cd *simplecobra.Commandeer, r *rootCommand, args []string) error {
 					return c.convertContents(metadecoders.TOML)
 				},
-				withc: func(cmd *cobra.Command) {
+				withc: func(cmd *cobra.Command, r *rootCommand) {
 				},
 			},
 			&simpleCommand{
@@ -67,7 +67,7 @@ to use YAML for the front matter.`,
 				run: func(ctx context.Context, cd *simplecobra.Commandeer, r *rootCommand, args []string) error {
 					return c.convertContents(metadecoders.YAML)
 				},
-				withc: func(cmd *cobra.Command) {
+				withc: func(cmd *cobra.Command, r *rootCommand) {
 				},
 			},
 		},
@@ -84,7 +84,7 @@ type convertCommand struct {
 	r *rootCommand
 	h *hugolib.HugoSites
 
-	// Commmands.
+	// Commands.
 	commands []simplecobra.Commander
 }
 
@@ -100,7 +100,8 @@ func (c *convertCommand) Run(ctx context.Context, cd *simplecobra.Commandeer, ar
 	return nil
 }
 
-func (c *convertCommand) WithCobraCommand(cmd *cobra.Command) error {
+func (c *convertCommand) Init(cd *simplecobra.Commandeer) error {
+	cmd := cd.CobraCommand
 	cmd.Short = "Convert your content to different formats"
 	cmd.Long = `Convert your content (e.g. front matter) to different formats.
 
@@ -109,10 +110,11 @@ See convert's subcommands toJSON, toTOML and toYAML for more information.`
 	cmd.PersistentFlags().StringVarP(&c.outputDir, "output", "o", "", "filesystem path to write files to")
 	cmd.PersistentFlags().BoolVar(&c.unsafe, "unsafe", false, "enable less safe operations, please backup first")
 
+	cmd.RunE = nil
 	return nil
 }
 
-func (c *convertCommand) Init(cd, runner *simplecobra.Commandeer) error {
+func (c *convertCommand) PreRun(cd, runner *simplecobra.Commandeer) error {
 	c.r = cd.Root.Command.(*rootCommand)
 	cfg := config.New()
 	cfg.Set("buildDrafts", true)
@@ -139,7 +141,7 @@ func (c *convertCommand) convertAndSavePage(p page.Page, site *hugolib.Site, tar
 
 	errMsg := fmt.Errorf("error processing file %q", p.File().Path())
 
-	site.Log.Infoln("ttempting to convert", p.File().Filename())
+	site.Log.Infoln("attempting to convert", p.File().Filename())
 
 	f := p.File()
 	file, err := f.FileInfo().Meta().Open()

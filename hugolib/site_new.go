@@ -18,10 +18,12 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"os"
 	"sort"
 	"time"
 
 	radix "github.com/armon/go-radix"
+	"github.com/bep/logg"
 	"github.com/gohugoio/hugo/common/hugo"
 	"github.com/gohugoio/hugo/common/loggers"
 	"github.com/gohugoio/hugo/common/maps"
@@ -29,6 +31,7 @@ import (
 	"github.com/gohugoio/hugo/config"
 	"github.com/gohugoio/hugo/config/allconfig"
 	"github.com/gohugoio/hugo/deps"
+	"github.com/gohugoio/hugo/helpers"
 	"github.com/gohugoio/hugo/identity"
 	"github.com/gohugoio/hugo/langs"
 	"github.com/gohugoio/hugo/langs/i18n"
@@ -37,6 +40,7 @@ import (
 	"github.com/gohugoio/hugo/navigation"
 	"github.com/gohugoio/hugo/output"
 	"github.com/gohugoio/hugo/publisher"
+	"github.com/gohugoio/hugo/resources/kinds"
 	"github.com/gohugoio/hugo/resources/page"
 	"github.com/gohugoio/hugo/resources/page/pagemeta"
 	"github.com/gohugoio/hugo/resources/resource"
@@ -99,19 +103,41 @@ func (s *Site) Debug() {
 func NewHugoSites(cfg deps.DepsCfg) (*HugoSites, error) {
 	conf := cfg.Configs.GetFirstLanguageConfig()
 
-	logger := cfg.Logger
-	if logger == nil {
-		logger = loggers.NewErrorLogger()
+	var logger loggers.Logger
+	if cfg.TestLogger != nil {
+		logger = cfg.TestLogger
+	} else {
+		var logHookLast func(e *logg.Entry) error
+		if cfg.Configs.Base.PanicOnWarning {
+			logHookLast = loggers.PanicOnWarningHook
+		}
+		if cfg.LogOut == nil {
+			cfg.LogOut = os.Stdout
+		}
+		if cfg.LogLevel == 0 {
+			cfg.LogLevel = logg.LevelWarn
+		}
+
+		logOpts := loggers.Options{
+			Level:               cfg.LogLevel,
+			Distinct:            true, // This will drop duplicate log warning and errors.
+			HandlerPost:         logHookLast,
+			Stdout:              cfg.LogOut,
+			Stderr:              cfg.LogOut,
+			StoreErrors:         conf.Running(),
+			SuppresssStatements: conf.IgnoredErrors(),
+		}
+		logger = loggers.New(logOpts)
 	}
-	ignorableLogger := loggers.NewIgnorableLogger(logger, conf.IgnoredErrors())
 
 	firstSiteDeps := &deps.Deps{
 		Fs:                  cfg.Fs,
-		Log:                 ignorableLogger,
+		Log:                 logger,
 		Conf:                conf,
 		TemplateProvider:    tplimpl.DefaultTemplateProvider,
 		TranslationProvider: i18n.NewTranslationProvider(),
 	}
+
 	if err := firstSiteDeps.Init(); err != nil {
 		return nil, err
 	}
@@ -127,10 +153,12 @@ func NewHugoSites(cfg deps.DepsCfg) (*HugoSites, error) {
 		k := language.Lang
 		conf := confm.LanguageConfigMap[k]
 
-		frontmatterHandler, err := pagemeta.NewFrontmatterHandler(cfg.Logger, conf.Frontmatter)
+		frontmatterHandler, err := pagemeta.NewFrontmatterHandler(firstSiteDeps.Log, conf.Frontmatter)
 		if err != nil {
 			return nil, err
 		}
+
+		langs.SetParams(language, conf.Params)
 
 		s := &Site{
 			conf:     conf,
@@ -158,9 +186,9 @@ func NewHugoSites(cfg deps.DepsCfg) (*HugoSites, error) {
 			contentMap: newContentMap(contentMapConfig{
 				lang:                 k,
 				taxonomyConfig:       taxonomiesConfig.Values(),
-				taxonomyDisabled:     !conf.IsKindEnabled(page.KindTerm),
-				taxonomyTermDisabled: !conf.IsKindEnabled(page.KindTaxonomy),
-				pageDisabled:         !conf.IsKindEnabled(page.KindPage),
+				taxonomyDisabled:     !conf.IsKindEnabled(kinds.KindTerm),
+				taxonomyTermDisabled: !conf.IsKindEnabled(kinds.KindTaxonomy),
+				pageDisabled:         !conf.IsKindEnabled(kinds.KindPage),
 			}),
 			s: s,
 		}
@@ -206,6 +234,7 @@ func NewHugoSites(cfg deps.DepsCfg) (*HugoSites, error) {
 	}
 
 	return h, err
+
 }
 
 func newHugoSitesNew(cfg deps.DepsCfg, d *deps.Deps, sites []*Site) (*HugoSites, error) {
@@ -259,7 +288,7 @@ func newHugoSitesNew(cfg deps.DepsCfg, d *deps.Deps, sites []*Site) (*HugoSites,
 		dependencies = append(dependencies, depFromMod(m))
 	}
 
-	h.hugoInfo = hugo.NewInfo(h.Configs.Base.Environment, dependencies)
+	h.hugoInfo = hugo.NewInfo(h.Configs.GetFirstLanguageConfig(), dependencies)
 
 	var prototype *deps.Deps
 	for i, s := range sites {
@@ -278,7 +307,7 @@ func newHugoSitesNew(cfg deps.DepsCfg, d *deps.Deps, sites []*Site) (*HugoSites,
 	}
 
 	// Only needed in server mode.
-	if cfg.Configs.Base.Internal.Running {
+	if cfg.Configs.Base.Internal.Watch {
 		h.ContentChanges = &contentChangeMap{
 			pathSpec:      h.PathSpec,
 			symContent:    make(map[string]map[string]bool),
@@ -343,12 +372,10 @@ func (s *Site) Copyright() string {
 	return s.conf.Copyright
 }
 
-func (s *Site) RSSLink() string {
-	rssOutputFormat, found := s.conf.C.KindOutputFormats[page.KindHome].GetByName("rss")
-	if !found {
-		return ""
-	}
-	return s.permalink(rssOutputFormat.BaseFilename())
+func (s *Site) RSSLink() template.URL {
+	helpers.Deprecated("Site.RSSLink", "Use the Output Format's Permalink method instead, e.g. .OutputFormats.Get \"RSS\".Permalink", false)
+	rssOutputFormat := s.home.OutputFormats().Get("rss")
+	return template.URL(rssOutputFormat.Permalink())
 }
 
 func (s *Site) Config() page.SiteConfig {
@@ -359,10 +386,7 @@ func (s *Site) Config() page.SiteConfig {
 }
 
 func (s *Site) LanguageCode() string {
-	if s.conf.LanguageCode != "" {
-		return s.conf.LanguageCode
-	}
-	return s.language.Lang
+	return s.Language().LanguageCode()
 }
 
 // Returns all Sites for all languages.
@@ -411,6 +435,10 @@ func (s *Site) Author() map[string]any {
 	return s.conf.Author
 }
 
+func (s *Site) Authors() page.AuthorList {
+	return page.AuthorList{}
+}
+
 func (s *Site) Social() map[string]string {
 	return s.conf.Social
 }
@@ -425,7 +453,7 @@ func (s *Site) GoogleAnalytics() string {
 	return s.Config().Services.GoogleAnalytics.ID
 }
 
-func (s *Site) Param(key string) (any, error) {
+func (s *Site) Param(key any) (any, error) {
 	return resource.Param(s, nil, key)
 }
 
@@ -434,17 +462,20 @@ func (s *Site) Data() map[string]any {
 	return s.s.h.Data()
 }
 
+func (s *Site) BuildDrafts() bool {
+	return s.conf.BuildDrafts
+}
+
+func (s *Site) IsMultiLingual() bool {
+	return s.h.isMultiLingual()
+}
+
 func (s *Site) LanguagePrefix() string {
-	conf := s.s.Conf
-	if !conf.IsMultiLingual() {
+	prefix := s.GetLanguagePrefix()
+	if prefix == "" {
 		return ""
 	}
-
-	if !conf.DefaultContentLanguageInSubdir() && s.language.Lang == conf.DefaultContentLanguage() {
-		return ""
-	}
-
-	return "/" + s.language.Lang
+	return "/" + prefix
 }
 
 // Returns the identity of this site.

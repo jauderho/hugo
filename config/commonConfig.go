@@ -15,12 +15,15 @@ package config
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
+	"github.com/bep/logg"
+	"github.com/gobwas/glob"
+	"github.com/gohugoio/hugo/common/loggers"
 	"github.com/gohugoio/hugo/common/types"
 
-	"github.com/gobwas/glob"
 	"github.com/gohugoio/hugo/common/herrors"
 	"github.com/mitchellh/mapstructure"
 	"github.com/spf13/cast"
@@ -77,9 +80,29 @@ type LoadConfigResult struct {
 	BaseConfig  BaseConfig
 }
 
-var DefaultBuild = BuildConfig{
+var defaultBuild = BuildConfig{
 	UseResourceCacheWhen: "fallback",
-	WriteStats:           false,
+	BuildStats:           BuildStats{},
+
+	CacheBusters: []CacheBuster{
+		{
+			Source: `assets/.*\.(js|ts|jsx|tsx)`,
+			Target: `(js|scripts|javascript)`,
+		},
+		{
+			Source: `assets/.*\.(css|sass|scss)$`,
+			Target: cssTargetCachebusterRe,
+		},
+		{
+			Source: `(postcss|tailwind)\.config\.js`,
+			Target: cssTargetCachebusterRe,
+		},
+		// This is deliberately coarse grained; it will cache bust resources with "json" in the cache key when js files changes, which is good.
+		{
+			Source: `assets/.*\.(.*)$`,
+			Target: `$1`,
+		},
+	},
 }
 
 // BuildConfig holds some build related configuration.
@@ -88,11 +111,35 @@ type BuildConfig struct {
 
 	// When enabled, will collect and write a hugo_stats.json with some build
 	// related aggregated data (e.g. CSS class names).
-	WriteStats bool
+	// Note that this was a bool <= v0.115.0.
+	BuildStats BuildStats
 
-	// Can be used to toggle off writing of the intellinsense /assets/jsconfig.js
+	// Can be used to toggle off writing of the IntelliSense /assets/jsconfig.js
 	// file.
 	NoJSConfigInAssets bool
+
+	// Can used to control how the resource cache gets evicted on rebuilds.
+	CacheBusters []CacheBuster
+}
+
+// BuildStats configures if and what to write to the hugo_stats.json file.
+type BuildStats struct {
+	Enable         bool
+	DisableTags    bool
+	DisableClasses bool
+	DisableIDs     bool
+}
+
+func (w BuildStats) Enabled() bool {
+	if !w.Enable {
+		return false
+	}
+	return !w.DisableTags || !w.DisableClasses || !w.DisableIDs
+}
+
+func (b BuildConfig) clone() BuildConfig {
+	b.CacheBusters = append([]CacheBuster{}, b.CacheBusters...)
+	return b
 }
 
 func (b BuildConfig) UseResourceCache(err error) bool {
@@ -101,22 +148,61 @@ func (b BuildConfig) UseResourceCache(err error) bool {
 	}
 
 	if b.UseResourceCacheWhen == "fallback" {
-		return err == herrors.ErrFeatureNotAvailable
+		return herrors.IsFeatureNotAvailableError(err)
 	}
 
 	return true
 }
 
+// MatchCacheBuster returns the cache buster for the given path p, nil if none.
+func (s BuildConfig) MatchCacheBuster(logger loggers.Logger, p string) (func(string) bool, error) {
+	var matchers []func(string) bool
+	for _, cb := range s.CacheBusters {
+		if matcher := cb.compiledSource(p); matcher != nil {
+			matchers = append(matchers, matcher)
+		}
+	}
+	if len(matchers) > 0 {
+		return (func(cacheKey string) bool {
+			for _, m := range matchers {
+				if m(cacheKey) {
+					return true
+				}
+			}
+			return false
+		}), nil
+	}
+	return nil, nil
+}
+
+func (b *BuildConfig) CompileConfig(logger loggers.Logger) error {
+	for i, cb := range b.CacheBusters {
+		if err := cb.CompileConfig(logger); err != nil {
+			return fmt.Errorf("failed to compile cache buster %q: %w", cb.Source, err)
+		}
+		b.CacheBusters[i] = cb
+	}
+	return nil
+}
+
 func DecodeBuildConfig(cfg Provider) BuildConfig {
 	m := cfg.GetStringMap("build")
-	b := DefaultBuild
+
+	b := defaultBuild.clone()
 	if m == nil {
 		return b
 	}
 
+	// writeStats was a bool <= v0.115.0.
+	if writeStats, ok := m["writestats"]; ok {
+		if bb, ok := writeStats.(bool); ok {
+			m["buildstats"] = BuildStats{Enable: bb}
+		}
+	}
+
 	err := mapstructure.WeakDecode(m, &b)
 	if err != nil {
-		return DefaultBuild
+		return b
 	}
 
 	b.UseResourceCacheWhen = strings.ToLower(b.UseResourceCacheWhen)
@@ -152,7 +238,7 @@ type Server struct {
 	compiledRedirects []glob.Glob
 }
 
-func (s *Server) CompileConfig() error {
+func (s *Server) CompileConfig(logger loggers.Logger) error {
 	if s.compiledHeaders != nil {
 		return nil
 	}
@@ -162,6 +248,7 @@ func (s *Server) CompileConfig() error {
 	for _, r := range s.Redirects {
 		s.compiledRedirects = append(s.compiledRedirects, glob.MustCompile(r.From))
 	}
+
 	return nil
 }
 
@@ -228,9 +315,77 @@ type Redirect struct {
 	Force bool
 }
 
+// CacheBuster configures cache busting for assets.
+type CacheBuster struct {
+	// Trigger for files matching this regexp.
+	Source string
+
+	// Cache bust targets matching this regexp.
+	// This regexp can contain group matches (e.g. $1) from the source regexp.
+	Target string
+
+	compiledSource func(string) func(string) bool
+}
+
+func (c *CacheBuster) CompileConfig(logger loggers.Logger) error {
+	if c.compiledSource != nil {
+		return nil
+	}
+
+	source := c.Source
+	sourceRe, err := regexp.Compile(source)
+	if err != nil {
+		return fmt.Errorf("failed to compile cache buster source %q: %w", c.Source, err)
+	}
+	target := c.Target
+	var compileErr error
+	debugl := logger.Logger().WithLevel(logg.LevelDebug).WithField(loggers.FieldNameCmd, "cachebuster")
+
+	c.compiledSource = func(s string) func(string) bool {
+		m := sourceRe.FindStringSubmatch(s)
+		matchString := "no match"
+		match := m != nil
+		if match {
+			matchString = "match!"
+		}
+		debugl.Logf("Matching %q with source %q: %s", s, source, matchString)
+		if !match {
+			return nil
+		}
+		groups := m[1:]
+		currentTarget := target
+		// Replace $1, $2 etc. in target.
+		for i, g := range groups {
+			currentTarget = strings.ReplaceAll(target, fmt.Sprintf("$%d", i+1), g)
+		}
+		targetRe, err := regexp.Compile(currentTarget)
+		if err != nil {
+			compileErr = fmt.Errorf("failed to compile cache buster target %q: %w", currentTarget, err)
+			return nil
+		}
+		return func(ss string) bool {
+			match = targetRe.MatchString(ss)
+			matchString := "no match"
+			if match {
+				matchString = "match!"
+			}
+			logger.Debugf("Matching %q with target %q: %s", ss, currentTarget, matchString)
+
+			return match
+		}
+
+	}
+	return compileErr
+}
+
 func (r Redirect) IsZero() bool {
 	return r.From == ""
 }
+
+const (
+	// Keep this a little coarse grained, some false positives are OK.
+	cssTargetCachebusterRe = `(css|styles|scss|sass)`
+)
 
 func DecodeServer(cfg Provider) (Server, error) {
 	s := &Server{}

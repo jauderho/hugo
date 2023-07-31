@@ -22,9 +22,13 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	godartsassv1 "github.com/bep/godartsass"
+	"github.com/mitchellh/mapstructure"
+
 	"time"
 
-	"github.com/bep/godartsass"
+	"github.com/bep/godartsass/v2"
 	"github.com/gohugoio/hugo/common/hexec"
 	"github.com/gohugoio/hugo/hugofs/files"
 
@@ -60,6 +64,7 @@ type HugoInfo struct {
 	// version of go that the Hugo binary was built with
 	GoVersion string
 
+	conf ConfigProvider
 	deps []*Dependency
 }
 
@@ -81,15 +86,26 @@ func (i HugoInfo) IsExtended() bool {
 	return IsExtended
 }
 
+// WorkingDir returns the project working directory.
+func (i HugoInfo) WorkingDir() string {
+	return i.conf.WorkingDir()
+}
+
 // Deps gets a list of dependencies for this Hugo build.
 func (i HugoInfo) Deps() []*Dependency {
 	return i.deps
 }
 
+// ConfigProvider represents the config options that are relevant for HugoInfo.
+type ConfigProvider interface {
+	Environment() string
+	WorkingDir() string
+}
+
 // NewInfo creates a new Hugo Info object.
-func NewInfo(environment string, deps []*Dependency) HugoInfo {
-	if environment == "" {
-		environment = EnvironmentProduction
+func NewInfo(conf ConfigProvider, deps []*Dependency) HugoInfo {
+	if conf.Environment() == "" {
+		panic("environment not set")
 	}
 	var (
 		commitHash string
@@ -107,7 +123,8 @@ func NewInfo(environment string, deps []*Dependency) HugoInfo {
 	return HugoInfo{
 		CommitHash:  commitHash,
 		BuildDate:   buildDate,
-		Environment: environment,
+		Environment: conf.Environment(),
+		conf:        conf,
 		deps:        deps,
 		GoVersion:   goVersion,
 	}
@@ -225,7 +242,10 @@ func GetDependencyListNonGo() []string {
 	}
 
 	if dartSass := dartSassVersion(); dartSass.ProtocolVersion != "" {
-		const dartSassPath = "github.com/sass/dart-sass-embedded"
+		var dartSassPath = "github.com/sass/dart-sass-embedded"
+		if IsDartSassV2() {
+			dartSassPath = "github.com/sass/dart-sass"
+		}
 		deps = append(deps,
 			formatDep(dartSassPath+"/protocol", dartSass.ProtocolVersion),
 			formatDep(dartSassPath+"/compiler", dartSass.CompilerVersion),
@@ -270,11 +290,46 @@ type Dependency struct {
 }
 
 func dartSassVersion() godartsass.DartSassVersion {
-	// This is also duplicated in the dartsass package.
-	const dartSassEmbeddedBinaryName = "dart-sass-embedded"
-	if !hexec.InPath(dartSassEmbeddedBinaryName) {
+	if DartSassBinaryName == "" {
 		return godartsass.DartSassVersion{}
 	}
-	v, _ := godartsass.Version(dartSassEmbeddedBinaryName)
-	return v
+	if IsDartSassV2() {
+		v, _ := godartsass.Version(DartSassBinaryName)
+		return v
+	}
+
+	v, _ := godartsassv1.Version(DartSassBinaryName)
+	var vv godartsass.DartSassVersion
+	mapstructure.WeakDecode(v, &vv)
+	return vv
+}
+
+// DartSassBinaryName is the name of the Dart Sass binary to use.
+// TODO(beop) find a better place for this.
+var DartSassBinaryName string
+
+func init() {
+	DartSassBinaryName = os.Getenv("DART_SASS_BINARY")
+	if DartSassBinaryName == "" {
+		for _, name := range dartSassBinaryNamesV2 {
+			if hexec.InPath(name) {
+				DartSassBinaryName = name
+				break
+			}
+		}
+		if DartSassBinaryName == "" {
+			if hexec.InPath(dartSassBinaryNameV1) {
+				DartSassBinaryName = dartSassBinaryNameV1
+			}
+		}
+	}
+}
+
+var (
+	dartSassBinaryNameV1  = "dart-sass-embedded"
+	dartSassBinaryNamesV2 = []string{"dart-sass", "sass"}
+)
+
+func IsDartSassV2() bool {
+	return !strings.Contains(DartSassBinaryName, "embedded")
 }

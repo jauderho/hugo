@@ -34,6 +34,7 @@ import (
 	hglob "github.com/gohugoio/hugo/hugofs/glob"
 	"github.com/gohugoio/hugo/modules"
 	"github.com/gohugoio/hugo/parser/metadecoders"
+	"github.com/gohugoio/hugo/tpl"
 	"github.com/spf13/afero"
 )
 
@@ -42,6 +43,10 @@ var ErrNoConfigFile = errors.New("Unable to locate config file or config directo
 func LoadConfig(d ConfigSourceDescriptor) (*Configs, error) {
 	if len(d.Environ) == 0 && !hugo.IsRunningAsTest() {
 		d.Environ = os.Environ()
+	}
+
+	if d.Logger == nil {
+		d.Logger = loggers.NewDefault()
 	}
 
 	l := &configLoader{ConfigSourceDescriptor: d, cfg: config.New()}
@@ -54,7 +59,7 @@ func LoadConfig(d ConfigSourceDescriptor) (*Configs, error) {
 		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
 
-	configs, err := FromLoadConfigResult(d.Fs, res)
+	configs, err := fromLoadConfigResult(d.Fs, d.Logger, res)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create config from result: %w", err)
 	}
@@ -63,13 +68,19 @@ func LoadConfig(d ConfigSourceDescriptor) (*Configs, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to load modules: %w", err)
 	}
+
 	if len(l.ModulesConfigFiles) > 0 {
 		// Config merged in from modules.
 		// Re-read the config.
-		configs, err = FromLoadConfigResult(d.Fs, res)
+		configs, err = fromLoadConfigResult(d.Fs, d.Logger, res)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create config: %w", err)
+			return nil, fmt.Errorf("failed to create config from modules config: %w", err)
 		}
+		if err := configs.transientErr(); err != nil {
+			return nil, fmt.Errorf("failed to create config from modules config: %w", err)
+		}
+	} else if err := configs.transientErr(); err != nil {
+		return nil, fmt.Errorf("failed to create config: %w", err)
 	}
 
 	configs.Modules = moduleConfig.ActiveModules
@@ -78,6 +89,10 @@ func LoadConfig(d ConfigSourceDescriptor) (*Configs, error) {
 	if err := configs.Init(); err != nil {
 		return nil, fmt.Errorf("failed to init config: %w", err)
 	}
+
+	// This is unfortunate, but these are global settings.
+	tpl.SetSecurityAllowActionJSTmpl(configs.Base.Security.GoTemplates.AllowActionJSTmpl)
+	loggers.InitGlobalLogger(configs.Base.PanicOnWarning)
 
 	return configs, nil
 
@@ -124,7 +139,11 @@ type configLoader struct {
 
 // Handle some legacy values.
 func (l configLoader) applyConfigAliases() error {
-	aliases := []types.KeyValueStr{{Key: "taxonomies", Value: "indexes"}}
+	aliases := []types.KeyValueStr{
+		{Key: "indexes", Value: "taxonomies"},
+		{Key: "logI18nWarnings", Value: "printI18nWarnings"},
+		{Key: "logPathWarnings", Value: "printPathWarnings"},
+	}
 
 	for _, alias := range aliases {
 		if l.cfg.IsSet(alias.Key) {
@@ -202,25 +221,10 @@ func (l configLoader) applyDefaultConfig() error {
 }
 
 func (l configLoader) normalizeCfg(cfg config.Provider) error {
-	minify := cfg.Get("minify")
-	if b, ok := minify.(bool); ok && b {
+	if b, ok := cfg.Get("minifyOutput").(bool); ok && b {
+		cfg.Set("minify.minifyOutput", true)
+	} else if b, ok := cfg.Get("minify").(bool); ok && b {
 		cfg.Set("minify", maps.Params{"minifyOutput": true})
-	}
-
-	// Simplify later merge.
-	languages := cfg.GetStringMap("languages")
-	for _, v := range languages {
-		switch m := v.(type) {
-		case maps.Params:
-			// params have merge strategy deep by default.
-			// The languages config key has strategy none by default.
-			// This means that if these two sections does not exist on the left side,
-			// they will not get merged in, so just create some empty maps.
-			if _, ok := m["params"]; !ok {
-				m["params"] = maps.Params{}
-			}
-		}
-
 	}
 
 	return nil
@@ -289,15 +293,43 @@ func (l configLoader) applyOsEnvOverrides(environ []string) error {
 			} else {
 				l.cfg.Set(env.Key, val)
 			}
-		} else if nestedKey != "" {
-			owner[nestedKey] = env.Value
 		} else {
-			// The container does not exist yet.
-			l.cfg.Set(strings.ReplaceAll(env.Key, delim, "."), env.Value)
+			if nestedKey != "" {
+				owner[nestedKey] = env.Value
+			} else {
+				var val any
+				key := strings.ReplaceAll(env.Key, delim, ".")
+				_, ok := allDecoderSetups[key]
+				if ok {
+					// A map.
+					if v, err := metadecoders.Default.UnmarshalStringTo(env.Value, map[string]interface{}{}); err == nil {
+						val = v
+					}
+				}
+				if val == nil {
+					// A string.
+					val = l.envStringToVal(key, env.Value)
+				}
+				l.cfg.Set(key, val)
+			}
 		}
 	}
 
 	return nil
+}
+
+func (l *configLoader) envStringToVal(k, v string) any {
+	switch k {
+	case "disablekinds", "disablelanguages":
+		if strings.Contains(v, ",") {
+			return strings.Split(v, ",")
+		} else {
+			return strings.Fields(v)
+		}
+	default:
+		return v
+	}
+
 }
 
 func (l *configLoader) loadConfigMain(d ConfigSourceDescriptor) (config.LoadConfigResult, modules.ModulesConfig, error) {
