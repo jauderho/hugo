@@ -56,6 +56,7 @@ type Site interface {
 	Home() Page
 
 	// Returns true if we're running in a server.
+	// Deprecated: use hugo.IsServer instead
 	IsServer() bool
 
 	// Returns the server port.
@@ -175,6 +176,7 @@ func (s *siteWrapper) Authors() AuthorList {
 	return AuthorList{}
 }
 
+// Deprecated: Use .Site.Config.Services.GoogleAnalytics.ID instead
 func (s *siteWrapper) GoogleAnalytics() string {
 	return s.s.GoogleAnalytics()
 }
@@ -211,6 +213,7 @@ func (s *siteWrapper) Home() Page {
 	return s.s.Home()
 }
 
+// Deprecated: use hugo.IsServer instead
 func (s *siteWrapper) IsServer() bool {
 	return s.s.IsServer()
 }
@@ -295,6 +298,7 @@ func (s *siteWrapper) IsMultiLingual() bool {
 	return s.s.IsMultiLingual()
 }
 
+// Deprecated: Use .Site.Config.Services.Disqus.Shortname instead
 func (s *siteWrapper) DisqusShortname() string {
 	return s.s.DisqusShortname()
 }
@@ -371,6 +375,7 @@ func (t testSite) Languages() langs.Languages {
 	return nil
 }
 
+// Deprecated: Use .Site.Config.Services.GoogleAnalytics.ID instead
 func (t testSite) GoogleAnalytics() string {
 	return ""
 }
@@ -383,6 +388,7 @@ func (t testSite) GetIdentity() identity.Identity {
 	return identity.KeyValueIdentity{Key: "site", Value: t.l.Lang}
 }
 
+// Deprecated: use hugo.IsServer instead
 func (t testSite) IsServer() bool {
 	return false
 }
@@ -435,6 +441,7 @@ func (testSite) GetPageWithTemplateInfo(info tpl.Info, ref ...string) (Page, err
 	return nil, nil
 }
 
+// Deprecated: Use .Site.Config.Services.Disqus.Shortname instead
 func (testSite) DisqusShortname() string {
 	return ""
 }

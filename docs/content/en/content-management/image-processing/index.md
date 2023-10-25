@@ -12,9 +12,9 @@ weight: 90
 ---
 ## Image resources
 
-To process an image, you must access the image as either a page resource or a global resource.
+To process an image you must access the file as a page resource, global resource, or remote resource.
 
-### Page resources
+### Page resource
 
 A page resource is a file within a [page bundle]. A page bundle is a directory with an `index.md` or `_index.md` file at its root.
 
@@ -26,13 +26,15 @@ content/
         └── sunset.jpg    <-- page resource
 ```
 
-### Global resources
+To access an image as a page resource:
 
-A global resource is a file:
+```go-html-template
+{{ $image := .Resources.Get "sunset.jpg" }}
+```
 
-- Within the `assets` directory, or
-- Within any directory [mounted] to the `assets` directory, or
-- Located on a remote server accessible via `http` or `https`
+### Global resource
+
+A global resource is a file within the `assets` directory, or within any directory [mounted] to the `assets` directory.
 
 ```text
 assets/
@@ -40,13 +42,15 @@ assets/
     └── sunset.jpg    <-- global resource
 ```
 
-To access a local image as a global resource:
+To access an image as a global resource:
 
 ```go-html-template
 {{ $image := resources.Get "images/sunset.jpg" }}
 ```
 
-To access a remote image as a global resource:
+### Remote resource
+
+A remote resource is a file on a remote server, accessible via http or https. To access an image as a remote resource:
 
 ```go-html-template
 {{ $image := resources.GetRemote "https://gohugo.io/img/hugo-logo.png" }}
@@ -80,13 +84,61 @@ Example 3: A more concise way to skip image rendering if the resource is not fou
 {{ end }}
 ```
 
+Example 4: Skips rendering if there's problem accessing a remote resource.
+
+```go-html-template
+{{ $u := "https://gohugo.io/img/hugo-logo.png" }}
+{{ with resources.GetRemote $u }}
+  {{ with .Err }}
+    {{ errorf "%s" . }}
+  {{ else }}
+    <img src="{{ .RelPermalink }}" width="{{ .Width }}" height="{{ .Height }}">
+  {{ end }}
+{{ else }}
+  {{ errorf "Unable to get remote resource %q" $u }}
+{{ end }}
+```
+
 ## Image processing methods
 
-The `image` resource implements the  [`Resize`], [`Fit`], [`Fill`], [`Crop`], [`Filter`], [`Colors`] and [`Exif`] methods.
+The `image` resource implements the  [`Process`],  [`Resize`], [`Fit`], [`Fill`], [`Crop`], [`Filter`], [`Colors`] and [`Exif`] methods.
 
 {{% note %}}
 Metadata (EXIF, IPTC, XMP, etc.) is not preserved during image transformation. Use the [`Exif`] method with the _original_ image to extract EXIF metadata from JPEG or TIFF images.
 {{% /note %}}
+
+### Process
+
+{{< new-in "0.119.0" >}}
+
+{{% note %}}
+The `Process` method is also available as a filter, which is more effective if need to apply multiple filters to an image. See [Process filter](/functions/images/#process).
+{{% /note %}}
+
+Process processes the image with the given specification. The specification can contain an optional action, one of `resize`, `crop`, `fit` or `fill`. This means that you can use this method instead of [`Resize`], [`Fit`], [`Fill`], or [`Crop`].
+
+See [Options](#image-processing-options) for available options.
+
+You can also use this method apply image processing that does not need any scaling, e.g. format conversions:
+
+```go-html-template
+{{/* Convert the image from JPG to PNG. */}}
+{{ $png := $jpg.Process "png" }}
+```
+
+Some more examples:
+
+```go-html-template
+{{/* Rotate the image 90 degrees counter-clockwise. */}}
+{{ $image := $image.Process "r90" }}
+
+{{/* Scaling actions. */}}
+{{ $image := $image.Process "resize 600x" }}
+{{ $image := $image.Process "crop 600x400" }}
+{{ $image := $image.Process "fit 600x400" }}
+{{ $image := $image.Process "fill 600x400" }}
+```
+
 
 ### Resize
 
@@ -253,7 +305,7 @@ In the example above, on the second line, we have reversed width and height to r
 
 ### Anchor
 
-When using the [`Crop`] or [`Fill`] method, the _anchor_ determines the placement of the crop box. You may specify `TopLeft`, `Top`, `TopRight`, `Left`, `Center`,`Right`, `BottomLeft`, `Bottom`, `BottomRight`, or `Smart`.
+When using the [`Crop`] or [`Fill`] method, the _anchor_ determines the placement of the crop box. You may specify `TopLeft`, `Top`, `TopRight`, `Left`, `Center`, `Right`, `BottomLeft`, `Bottom`, `BottomRight`, or `Smart`.
 
 The default value is `Smart`, which uses [Smartcrop] image analysis to determine the optimal placement of the crop box. You may override the default value in the [site configuration].
 
@@ -384,14 +436,7 @@ Note the self-closing shortcode syntax above. You may call the `imgproc` shortco
 
 Define an `imaging` section in your site configuration to set the default [image processing options](#image-processing-options).
 
-{{< code-toggle file="hugo" copy=true >}}
-[imaging]
-resampleFilter = "Box"
-quality = 75
-hint = "photo"
-anchor = "Smart"
-bgColor = "#ffffff"
-{{< /code-toggle >}}
+{{< code-toggle config="imaging" />}}
 
 anchor
 : See image processing options: [anchor](#anchor).
@@ -456,15 +501,16 @@ If you change image processing methods or options, or if you rename or remove im
 hugo --gc
 ```
 
-[time.Format]: /functions/dateformat
+[time.Format]: /functions/time/format
 [`anchor`]: /content-management/image-processing#anchor
 [mounted]: /hugo-modules/configuration#module-configuration-mounts
 [page bundle]: /content-management/page-bundles
-[`lang.FormatNumber`]: /functions/lang
+[`lang.FormatNumber`]: /functions/lang/formatnumber
 [filters]: /functions/images
 [github.com/disintegration/imaging]: <https://github.com/disintegration/imaging#image-resizing>
 [Smartcrop]: <https://github.com/muesli/smartcrop#smartcrop>
 [Exif]: <https://en.wikipedia.org/wiki/Exif>
+[`Process`]: #process
 [`Colors`]: #colors
 [`Crop`]: #crop
 [`Exif`]: #exif
@@ -473,4 +519,4 @@ hugo --gc
 [`Fit`]: #fit
 [`Resize`]: #resize
 [site configuration]: #processing-options
-[`with`]: /functions/with/
+[`with`]: /functions/go-template/with/

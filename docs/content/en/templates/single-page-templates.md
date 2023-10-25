@@ -36,10 +36,10 @@ This single page template makes use of Hugo [base templates], the [`.Format` fun
   </section>
   <aside id="meta">
     <div>
-    <section>
-      <h4 id="date"> {{ .Date.Format "Mon Jan 2, 2006" }} </h4>
-      <h5 id="wordcount"> {{ .WordCount }} Words </h5>
-    </section>
+      <section>
+        <h4 id="date"> {{ .Date.Format "Mon Jan 2, 2006" }} </h4>
+        <h5 id="wordcount"> {{ .WordCount }} Words </h5>
+      </section>
       {{ with .GetTerms "topics" }}
         <ul id="topics">
           {{ range . }}
@@ -82,4 +82,4 @@ To easily generate new instances of a content type (e.g., new `.md` files in a s
 [section]: /content-management/sections/
 [site variables]: /variables/site/
 [spf13]: https://spf13.com/
-[`with`]: /functions/with/
+[`with`]: /functions/go-template/with/

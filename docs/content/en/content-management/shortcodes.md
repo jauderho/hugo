@@ -56,13 +56,8 @@ and a new line with a "quoted string".` */>}}
 
 ### Shortcodes with markdown
 
-In Hugo `0.55` we changed how the `%` delimiter works. Shortcodes using the `%` as the outer-most delimiter will now be fully rendered when sent to the content renderer. They can be part of the generated table of contents, footnotes, etc.
+Shortcodes using the `%` as the outer-most delimiter will be fully rendered when sent to the content renderer. This means that the rendered output from a shortcode can be part of the page's table of contents, footnotes, etc.
 
-If you want the old behavior, you can put the following line in the start of your shortcode template:
-
-```go-html-template
-{{ $_hugo_config := `{ "version": 1 }` }}
-```
 
 ### Shortcodes without markdown
 
@@ -192,7 +187,7 @@ Rendered:
 
 To specify one or more [highlighting options], include a quotation-encapsulated, comma-separated list:
 
-[highlighting options]: /functions/highlight/
+[highlighting options]: /functions/transform/highlight/
 
 ```text
 {{</* highlight go-html-template "lineNos=inline, lineNoStart=42" */>}}
@@ -396,7 +391,7 @@ To learn more about creating custom shortcodes, see the [shortcode template docu
 [`figure` shortcode]: #figure
 [contentmanagementsection]: /content-management/formats/
 [examplegist]: https://gist.github.com/spf13/7896402
-[figureelement]: https://html5doctor.com/the-figure-figcaption-elements/ "An article from HTML5 doctor discussing the fig and figcaption elements."
+[figureelement]: https://html5doctor.com/the-figure-figcaption-elements/
 [Hugo and the GDPR]: /about/hugo-and-gdpr/
 [Instagram]: https://www.instagram.com/
 [pagevariables]: /variables/page/

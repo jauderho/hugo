@@ -642,27 +642,33 @@ Simple Page With Some Date`
 	testAllMarkdownEnginesForPages(t, assertFunc, nil, pageContents...)
 }
 
-// Issue #2601
 func TestPageRawContent(t *testing.T) {
-	t.Parallel()
-	c := qt.New(t)
-	cfg, fs := newTestCfg()
-	configs, err := loadTestConfigFromProvider(cfg)
-	c.Assert(err, qt.IsNil)
 
-	writeSource(t, fs, filepath.Join("content", "raw.md"), `---
-title: Raw
+	files := `
+-- hugo.toml --
+-- content/basic.md --
 ---
-**Raw**`)
+title: "basic"
+---
+**basic**
+-- content/empty.md --
+---
+title: "empty"
+---
+-- layouts/_default/single.html --
+|{{ .RawContent }}|
+`
 
-	writeSource(t, fs, filepath.Join("layouts", "_default", "single.html"), `{{ .RawContent }}`)
+	b := NewIntegrationTestBuilder(
+		IntegrationTestConfig{
+			T:           t,
+			TxtarString: files,
+		},
+	).Build()
 
-	s := buildSingleSite(t, deps.DepsCfg{Fs: fs, Configs: configs}, BuildCfg{SkipRender: true})
+	b.AssertFileContent("public/basic/index.html", "|**basic**|")
+	b.AssertFileContent("public/empty/index.html", "! title")
 
-	c.Assert(len(s.RegularPages()), qt.Equals, 1)
-	p := s.RegularPages()[0]
-
-	c.Assert("**Raw**", qt.Equals, p.RawContent())
 }
 
 func TestPageWithShortCodeInSummary(t *testing.T) {
@@ -888,13 +894,13 @@ summary: Summary (zh)
 	b.Build(BuildCfg{})
 
 	b.AssertFileContent("public/index.html", `<html>
-	
+
 <body>
-	
+
 <h2>Translations</h2>
 <ul>
 
-	
+
 <li>Title: Title (zh), Summary (zh)</li>
 <li>Content: <p>这是一些内容</p>
 </li>
@@ -905,7 +911,7 @@ summary: Summary (zh)
 <li>Truncated: false</li>
 <li>FuzzyWordCount: 100</li>
 <li>ReadingTime: 1</li>
-<li>Len: 26</li>	
+<li>Len: 26</li>
 
 </ul>
 
@@ -915,7 +921,7 @@ summary: Summary (zh)
 	b.AssertFileContent("public/metadata.html", `<h2>Translations metadata</h2>
 <ul>
 
-	
+
 <li>Title: Title (zh), Summary (zh)</li>
 <li>Content: <p>这是一些内容</p>
 </li>
@@ -926,13 +932,13 @@ summary: Summary (zh)
 <li>Truncated: false</li>
 <li>FuzzyWordCount: 100</li>
 <li>ReadingTime: 1</li>
-<li>Len: 26</li>	
+<li>Len: 26</li>
 
 </ul>`)
 	b.AssertFileContent("public/zh_cn/index.html", `<html>
 
 <body>
-	
+
 <h2>Translations</h2>
 <ul>
 
@@ -947,7 +953,7 @@ summary: Summary (zh)
 <li>Truncated: false</li>
 <li>FuzzyWordCount: 100</li>
 <li>ReadingTime: 1</li>
-<li>Len: 29</li>	
+<li>Len: 29</li>
 
 </ul>
 
@@ -957,7 +963,7 @@ summary: Summary (zh)
 	b.AssertFileContent("public/zh_cn/metadata.html", `<h2>Translations metadata</h2>
 <ul>
 
-	
+
 <li>Title: Title (en), Summary (en)</li>
 <li>Content: <p>Here is some content.</p>
 </li>
@@ -968,7 +974,7 @@ summary: Summary (zh)
 <li>Truncated: false</li>
 <li>FuzzyWordCount: 100</li>
 <li>ReadingTime: 1</li>
-<li>Len: 29</li>	
+<li>Len: 29</li>
 
 </ul>`)
 }
@@ -1228,60 +1234,6 @@ func TestChompBOM(t *testing.T) {
 	checkPageTitle(t, p, "Simple")
 }
 
-func TestPageWithEmoji(t *testing.T) {
-	for _, enableEmoji := range []bool{true, false} {
-		v := config.New()
-		v.Set("enableEmoji", enableEmoji)
-
-		b := newTestSitesBuilder(t).WithViper(v)
-
-		b.WithContent("page-emoji.md", `---
-title: "Hugo Smile"
----
-This is a :smile:.
-<!--more--> 
-
-Another :smile: This is :not: :an: :emoji:.
-
-O :christmas_tree:
-
-Write me an :e-mail: or :email:?
-
-Too many colons: :: ::: :::: :?: :!: :.:
-
-If you dislike this video, you can hit that :-1: button :stuck_out_tongue_winking_eye:,
-but if you like it, hit :+1: and get subscribed!
-`)
-
-		b.CreateSites().Build(BuildCfg{})
-
-		if enableEmoji {
-			b.AssertFileContent("public/page-emoji/index.html",
-				"This is a 😄",
-				"Another 😄",
-				"This is :not: :an: :emoji:.",
-				"O 🎄",
-				"Write me an 📧 or ✉️?",
-				"Too many colons: :: ::: :::: :?: :!: :.:",
-				"you can hit that 👎 button 😜,",
-				"hit 👍 and get subscribed!",
-			)
-		} else {
-			b.AssertFileContent("public/page-emoji/index.html",
-				"This is a :smile:",
-				"Another :smile:",
-				"This is :not: :an: :emoji:.",
-				"O :christmas_tree:",
-				"Write me an :e-mail: or :email:?",
-				"Too many colons: :: ::: :::: :?: :!: :.:",
-				"you can hit that :-1: button :stuck_out_tongue_winking_eye:,",
-				"hit :+1: and get subscribed!",
-			)
-		}
-
-	}
-}
-
 func TestPageHTMLContent(t *testing.T) {
 	b := newTestSitesBuilder(t)
 	b.WithSimpleConfigFile()
@@ -1327,7 +1279,7 @@ func TestPageManualSummary(t *testing.T) {
 title: "Hugo"
 ---
 This is a {{< sc >}}.
-<!--more--> 
+<!--more-->
 Content.
 `)
 
@@ -1336,7 +1288,7 @@ Content.
 title: "Hugo"
 ---
 {{< sc >}}
-<!--more--> 
+<!--more-->
 {{< sc >}}
 `)
 
@@ -1357,7 +1309,7 @@ Summary<!--more-->{{< sc >}}
 #+DESCRIPTION: D1
 This is a {{< sc >}}.
 # more
-Content.	
+Content.
 `)
 
 	b.WithContent("page-org-variant1.org", `#+TITLE: T1
@@ -1365,7 +1317,7 @@ Summary.
 
 # more
 
-Content.	
+Content.
 `)
 
 	b.WithTemplatesAdded("layouts/shortcodes/sc.html", "a shortcode")
@@ -1659,7 +1611,7 @@ SUMMARY:{{ .Summary }}:{{ len .Summary }}:END
 
 	b := newTestSitesBuilder(t)
 	b.WithSimpleConfigFile().WithTemplatesAdded(single...).WithContent("p1.md", fmt.Sprintf(`---
-title: p1	
+title: p1
 ---
 
 %s
@@ -1998,7 +1950,6 @@ func TestRenderWithoutArgument(t *testing.T) {
 		IntegrationTestConfig{
 			T:           t,
 			TxtarString: files,
-			Running:     true,
 		},
 	).BuildE()
 

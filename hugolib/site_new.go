@@ -119,13 +119,13 @@ func NewHugoSites(cfg deps.DepsCfg) (*HugoSites, error) {
 		}
 
 		logOpts := loggers.Options{
-			Level:               cfg.LogLevel,
-			Distinct:            true, // This will drop duplicate log warning and errors.
-			HandlerPost:         logHookLast,
-			Stdout:              cfg.LogOut,
-			Stderr:              cfg.LogOut,
-			StoreErrors:         conf.Running(),
-			SuppresssStatements: conf.IgnoredErrors(),
+			Level:              cfg.LogLevel,
+			Distinct:           true, // This will drop duplicate log warning and errors.
+			HandlerPost:        logHookLast,
+			Stdout:             cfg.LogOut,
+			Stderr:             cfg.LogOut,
+			StoreErrors:        conf.Running(),
+			SuppressStatements: conf.IgnoredErrors(),
 		}
 		logger = loggers.New(logOpts)
 	}
@@ -195,7 +195,9 @@ func NewHugoSites(cfg deps.DepsCfg) (*HugoSites, error) {
 
 		s.PageCollections = newPageCollections(pm)
 		s.siteRefLinker, err = newSiteRefLinker(s)
-
+		if err != nil {
+			return nil, err
+		}
 		// Set up the main publishing chain.
 		pub, err := publisher.NewDestinationPublisher(
 			firstSiteDeps.ResourceSpec,
@@ -354,7 +356,9 @@ func newHugoSitesNew(cfg deps.DepsCfg, d *deps.Deps, sites []*Site) (*HugoSites,
 }
 
 // Returns true if we're running in a server.
+// Deprecated: use hugo.IsServer instead
 func (s *Site) IsServer() bool {
+	helpers.Deprecated(".Site.IsServer", "Use hugo.IsServer instead.", false)
 	return s.conf.Internal.Running
 }
 
@@ -443,13 +447,15 @@ func (s *Site) Social() map[string]string {
 	return s.conf.Social
 }
 
-// TODO(bep): deprecate.
+// Deprecated: Use .Site.Config.Services.Disqus.Shortname instead
 func (s *Site) DisqusShortname() string {
+	helpers.Deprecated(".Site.DisqusShortname", "Use .Site.Config.Services.Disqus.Shortname instead.", false)
 	return s.Config().Services.Disqus.Shortname
 }
 
-// TODO(bep): deprecate.
+// Deprecated: Use .Site.Config.Services.GoogleAnalytics.ID instead
 func (s *Site) GoogleAnalytics() string {
+	helpers.Deprecated(".Site.GoogleAnalytics", "Use .Site.Config.Services.GoogleAnalytics.ID instead.", false)
 	return s.Config().Services.GoogleAnalytics.ID
 }
 

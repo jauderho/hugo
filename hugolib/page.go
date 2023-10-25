@@ -114,6 +114,10 @@ func (pa pageSiteAdapter) GetPage(ref string) (page.Page, error) {
 }
 
 type pageState struct {
+	// Incremented for each new page created.
+	// Note that this will change between builds for a given Page.
+	id int
+
 	// This slice will be of same length as the number of global slice of output
 	// formats (for all sites).
 	pageOutputs []*pageOutput
@@ -250,7 +254,7 @@ func (p *pageState) RegularPagesRecursive() page.Pages {
 	p.regularPagesRecursiveInit.Do(func() {
 		var pages page.Pages
 		switch p.Kind() {
-		case kinds.KindSection:
+		case kinds.KindSection, kinds.KindHome:
 			pages = p.getPagesRecursive()
 		default:
 			pages = p.RegularPages()
@@ -324,6 +328,7 @@ func (p *pageState) RawContent() string {
 	if start == -1 {
 		start = 0
 	}
+
 	return string(p.source.parsed.Input()[start:])
 }
 
@@ -723,9 +728,7 @@ Loop:
 			frontMatterSet = true
 
 			next := iter.Peek()
-			if !next.IsDone() {
-				p.source.posMainContent = next.Pos()
-			}
+			p.source.posMainContent = next.Pos()
 
 			if !p.s.shouldBuild(p) {
 				// Nothing more to do.
@@ -772,7 +775,7 @@ Loop:
 			currShortcode.pos = it.Pos()
 			currShortcode.length = iter.Current().Pos() - it.Pos()
 			if currShortcode.placeholder == "" {
-				currShortcode.placeholder = createShortcodePlaceholder("s", currShortcode.ordinal)
+				currShortcode.placeholder = createShortcodePlaceholder("s", p.id, currShortcode.ordinal)
 			}
 
 			if currShortcode.name != "" {
@@ -784,18 +787,14 @@ Loop:
 				currShortcode.params = s
 			}
 
-			currShortcode.placeholder = createShortcodePlaceholder("s", ordinal)
+			currShortcode.placeholder = createShortcodePlaceholder("s", p.id, ordinal)
 			ordinal++
 			s.shortcodes = append(s.shortcodes, currShortcode)
 
 			rn.AddShortcode(currShortcode)
 
 		case it.Type == pageparser.TypeEmoji:
-			if emoji := helpers.Emoji(it.ValStr(result.Input())); emoji != nil {
-				rn.AddReplacement(emoji, it)
-			} else {
-				rn.AddBytes(it)
-			}
+			rn.AddBytes(it)
 		case it.IsEOF():
 			break Loop
 		case it.IsError():

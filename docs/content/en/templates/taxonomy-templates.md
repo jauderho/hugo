@@ -41,14 +41,16 @@ See [Template Lookup](/templates/lookup-order/).
 
 A Taxonomy is a `map[string]WeightedPages`.
 
-.Get(term)
-: Returns the WeightedPages for a term.
+.Get TERM
+: Returns the WeightedPages for a given term. For example: ;
+`site.Taxonomies.tags.Get "tag-a"`.
 
-.Count(term)
-: The number of pieces of content assigned to this term.
+.Count TERM
+: The number of pieces of content assigned to the given term. For example: \
+`site.Taxonomies.tags.Count "tag-a"`.
 
 .Alphabetical
-: Returns an OrderedTaxonomy (slice) ordered by Term.
+: Returns an OrderedTaxonomy (slice) ordered by term.
 
 .ByCount
 : Returns an OrderedTaxonomy (slice) ordered by number of entries.
@@ -78,6 +80,9 @@ Each element of the slice has:
 .Count
 : The number of pieces of content assigned to this term.
 
+.Page
+: Returns a page reference for this term.
+
 .Pages
 : All Pages assigned to this term. All [list methods][renderlists] are available to this.
 
@@ -89,8 +94,11 @@ WeightedPages is simply a slice of WeightedPage.
 type WeightedPages []WeightedPage
 ```
 
-.Count(term)
+.Count
 : The number of pieces of content assigned to this term.
+
+.Page
+: Returns a page reference for this term.
 
 .Pages
 : Returns a slice of pages, which then can be ordered using any of the [list methods][renderlists].
@@ -261,7 +269,7 @@ This may take the form of a tag cloud, a menu, or simply a list.
 
 The following example displays all terms in a site's tags taxonomy:
 
-### Example: list all site tags 
+### Example: list all site tags
 
 ```go-html-template
 <ul>
@@ -314,12 +322,7 @@ Because taxonomies are lists, the [`.GetPage` function][getpage] can be used to 
 </ul>
 {{< /code >}}
 
-<!-- TODO: ### `.Site.GetPage` Taxonomy List Example -->
-
-<!-- TODO: ### `.Site.GetPage` Taxonomy Terms Example -->
-
-
-[delimit]: /functions/delimit/
+[delimit]: /functions/collections/delimit/
 [getpage]: /functions/getpage/
 [lists]: /templates/lists/
 [renderlists]: /templates/lists/

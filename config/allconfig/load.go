@@ -79,11 +79,12 @@ func LoadConfig(d ConfigSourceDescriptor) (*Configs, error) {
 		if err := configs.transientErr(); err != nil {
 			return nil, fmt.Errorf("failed to create config from modules config: %w", err)
 		}
+		configs.LoadingInfo.ConfigFiles = append(configs.LoadingInfo.ConfigFiles, l.ModulesConfigFiles...)
 	} else if err := configs.transientErr(); err != nil {
 		return nil, fmt.Errorf("failed to create config: %w", err)
 	}
 
-	configs.Modules = moduleConfig.ActiveModules
+	configs.Modules = moduleConfig.AllModules
 	configs.ModulesClient = modulesClient
 
 	if err := configs.Init(); err != nil {
@@ -470,7 +471,7 @@ func (l *configLoader) loadModules(configs *Configs) (modules.ModulesConfig, *mo
 	ex := hexec.New(conf.Security)
 
 	hook := func(m *modules.ModulesConfig) error {
-		for _, tc := range m.ActiveModules {
+		for _, tc := range m.AllModules {
 			if len(tc.ConfigFilenames()) > 0 {
 				if tc.Watch() {
 					l.ModulesConfigFiles = append(l.ModulesConfigFiles, tc.ConfigFilenames()...)

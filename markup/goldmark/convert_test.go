@@ -109,7 +109,7 @@ LINE1
 
 * Autolink: https://gohugo.io/
 * Strikethrough:~~Hi~~ Hello, world!
- 
+
 ## Table
 
 | foo | bar |
@@ -137,7 +137,7 @@ That's some text with a footnote.[^1]
 ## Definition Lists
 
 date
-: the datetime assigned to this page. 
+: the datetime assigned to this page.
 
 description
 : the description for the content.
@@ -204,8 +204,8 @@ unsafe = true
 
 	toc, ok := b.(converter.TableOfContentsProvider)
 	c.Assert(ok, qt.Equals, true)
-	tocHTML := toc.TableOfContents().ToHTML(1, 2, false)
-	c.Assert(tocHTML, qt.Contains, "TableOfContents")
+	tocString := string(toc.TableOfContents().ToHTML(1, 2, false))
+	c.Assert(tocString, qt.Contains, "TableOfContents")
 }
 
 func TestConvertAutoIDAsciiOnly(t *testing.T) {
@@ -625,4 +625,77 @@ unsafe = false
 `)
 	return testconfig.GetTestConfig(nil, cfg)
 
+}
+
+func TestConvertCJK(t *testing.T) {
+	c := qt.New(t)
+
+	content := `
+私は太郎です。
+プログラミングが好きです。\ 運動が苦手です。
+`
+
+	confStr := `
+[markup]
+[markup.goldmark]
+`
+
+	cfg := config.FromTOMLConfigString(confStr)
+	conf := testconfig.GetTestConfig(nil, cfg)
+
+	b := convert(c, conf, content)
+	got := string(b.Bytes())
+
+	c.Assert(got, qt.Contains, "<p>私は太郎です。\nプログラミングが好きです。\\ 運動が苦手です。</p>\n")
+}
+
+func TestConvertCJKWithExtensionWithEastAsianLineBreaksOption(t *testing.T) {
+	c := qt.New(t)
+
+	content := `
+私は太郎です。
+プログラミングが好きで、
+運動が苦手です。
+`
+
+	confStr := `
+[markup]
+[markup.goldmark]
+[markup.goldmark.extensions.CJK]
+enable=true
+eastAsianLineBreaks=true
+`
+
+	cfg := config.FromTOMLConfigString(confStr)
+	conf := testconfig.GetTestConfig(nil, cfg)
+
+	b := convert(c, conf, content)
+	got := string(b.Bytes())
+
+	c.Assert(got, qt.Contains, "<p>私は太郎です。プログラミングが好きで、運動が苦手です。</p>\n")
+}
+
+func TestConvertCJKWithExtensionWithEscapedSpaceOption(t *testing.T) {
+	c := qt.New(t)
+
+	content := `
+私は太郎です。
+プログラミングが好きです。\ 運動が苦手です。
+`
+
+	confStr := `
+[markup]
+[markup.goldmark]
+[markup.goldmark.extensions.CJK]
+enable=true
+escapedSpace=true
+`
+
+	cfg := config.FromTOMLConfigString(confStr)
+	conf := testconfig.GetTestConfig(nil, cfg)
+
+	b := convert(c, conf, content)
+	got := string(b.Bytes())
+
+	c.Assert(got, qt.Contains, "<p>私は太郎です。\nプログラミングが好きです。運動が苦手です。</p>\n")
 }
