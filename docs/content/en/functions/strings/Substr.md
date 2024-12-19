@@ -1,42 +1,37 @@
 ---
 title: strings.Substr
-linkTitle: substr
-description: Extracts parts of a string from a specified character's position and returns the specified number of characters.
-categories: [functions]
+description: Returns a substring of the given string, beginning with the start position and ending after the given length.
+categories: []
 keywords: []
-menu:
-  docs:
-    parent: functions
-function:
+action:
   aliases: [substr]
+  related:
+    - functions/strings/SliceString
   returnType: string
-  signatures: ['strings.Substr STRING START [LENGTH]']
-relatedFunctions: []
+  signatures: ['strings.Substr STRING [START] [LENGTH]']
 aliases: [/functions/substr]
 ---
 
-It normally takes two argument: `start` and `length`. It can also take one argument: `start`, i.e. `length` is omitted, in which case the substring starting from start until the end of the string will be returned.
+The start position is zero-based, where `0` represents the first character of the string. If START is not specified, the substring will begin at position `0`. Specify a negative START position to extract characters from the end of the string. 
 
-To extract characters from the end of the string, use a negative start number.
-
-If `length` is given and is negative, that number of characters will be omitted from the end of string.
+If LENGTH is not specified, the substring will include all characters from the START position to the end of the string. If negative, that number of characters will be omitted from the end of string.
 
 ```go-html-template
-{{ substr "abcdef" 0 }} → "abcdef"
-{{ substr "abcdef" 1 }} → "bcdef"
+{{ substr "abcdef" 0 }} → abcdef
+{{ substr "abcdef" 1 }} → bcdef
 
-{{ substr "abcdef" 0 1 }} → "a"
-{{ substr "abcdef" 1 1 }} → "b"
+{{ substr "abcdef" 0 1 }} → a
+{{ substr "abcdef" 1 1 }} → b
 
-{{ substr "abcdef" 0 -1 }} → "abcde"
-{{ substr "abcdef" 1 -1 }} → "bcde"
+{{ substr "abcdef" 0 -1 }} → abcde
+{{ substr "abcdef" 1 -1 }} → bcde
 
-{{ substr "abcdef" -1 }} → "f"
-{{ substr "abcdef" -2 }} → "ef"
+{{ substr "abcdef" -1 }} → f
+{{ substr "abcdef" -2 }} → ef
 
-{{ substr "abcdef" -1 1 }} → "f"
-{{ substr "abcdef" -2 1 }} → "e"
+{{ substr "abcdef" -1 1 }} → f
+{{ substr "abcdef" -2 1 }} → e
 
-{{ substr "abcdef" -3 -1 }} → "de"
-{{ substr "abcdef" -3 -2 }} → "d"
+{{ substr "abcdef" -3 -1 }} → de
+{{ substr "abcdef" -3 -2 }} → d
 ```

@@ -16,7 +16,8 @@ import (
 )
 
 func main() {
-	// The current is built with 2c1e5b05fe39fc5e6c730dd60e82946b8e67c6ba, tag: go1.21.1.
+	// The current is built with  6885bad7dd86880be6929c02085e5c7a67ff2887 go1.23.0
+	// TODO(bep) preserve the staticcheck.conf file.
 	fmt.Println("Forking ...")
 	defer fmt.Println("Done ...")
 
@@ -168,6 +169,9 @@ func doWithGoFiles(dir string,
 		return
 	}
 	must(filepath.Walk(filepath.Join(forkRoot, dir), func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
 		if info.IsDir() {
 			return nil
 		}

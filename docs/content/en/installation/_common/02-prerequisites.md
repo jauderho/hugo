@@ -1,3 +1,7 @@
+---
+_comment: Do not remove front matter.
+---
+
 ## Prerequisites
 
 Although not required in all cases, [Git], [Go], and [Dart Sass] are commonly used when working with Hugo.

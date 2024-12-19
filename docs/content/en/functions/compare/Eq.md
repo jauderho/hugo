@@ -1,23 +1,18 @@
 ---
 title: compare.Eq
-linkTitle: eq
 description: Returns the boolean truth of arg1 == arg2 || arg1 == arg3.
-categories: [functions]
+categories: []
 keywords: []
-menu:
-  docs:
-    parent: functions
-function:
+action:
   aliases: [eq]
+  related:
+    - functions/compare/Ge
+    - functions/compare/Gt
+    - functions/compare/Le
+    - functions/compare/Lt
+    - functions/compare/Ne
   returnType: bool
   signatures: ['compare.Eq ARG1 ARG2 [ARG...]']
-relatedFunctions:
-  - compare.Eq
-  - compare.Ge
-  - compare.Gt
-  - compare.Le
-  - compare.Lt
-  - compare.Ne
 aliases: [/functions/eq]
 ---
 
@@ -30,3 +25,5 @@ aliases: [/functions/eq]
 {{ eq 1 2 1 }} → true
 {{ eq 1 2 2 }} → false
 ```
+
+You can also use the `compare.Eq` function to compare strings, boolean values, dates, slices, maps, and pages.

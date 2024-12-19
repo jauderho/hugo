@@ -1,23 +1,18 @@
 ---
 title: compare.Ne
-linkTitle: ne
 description: Returns the boolean truth of arg1 != arg2 && arg1 != arg3.
-categories: [functions]
+categories: []
 keywords: []
-menu:
-  docs:
-    parent: functions
-function:
+action:
   aliases: [ne]
+  related:
+    - functions/compare/Eq
+    - functions/compare/Ge
+    - functions/compare/Gt
+    - functions/compare/Le
+    - functions/compare/Lt
   returnType: bool
   signatures: ['compare.Ne ARG1 ARG2 [ARG...]']
-relatedFunctions:
-  - compare.Eq
-  - compare.Ge
-  - compare.Gt
-  - compare.Le
-  - compare.Lt
-  - compare.Ne
 aliases: [/functions/ne]
 ---
 
@@ -30,3 +25,5 @@ aliases: [/functions/ne]
 {{ ne 1 2 1 }} → false
 {{ ne 1 2 2 }} → true
 ```
+
+You can also use the `compare.Ne` function to compare strings, boolean values, dates, slices, maps, and pages.

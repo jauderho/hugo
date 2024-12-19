@@ -96,6 +96,10 @@ archive_alias_replacements = { "linux-amd64.tar.gz" = "Linux-64bit.tar.gz" }
         goos = "openbsd"
         [[builds.os.archs]]
             goarch = "amd64"
+    [[builds.os]]
+        goos = "solaris"
+        [[builds.os.archs]]
+            goarch = "amd64"
 
 [[builds]]
     path = "container1/unix/extended"
@@ -116,10 +120,45 @@ archive_alias_replacements = { "linux-amd64.tar.gz" = "Linux-64bit.tar.gz" }
             goarch = "amd64"
 
 [[builds]]
+    path = "container1/unix/extended-withdeploy"
+
+    [builds.build_settings]
+        flags = ["-buildmode", "exe", "-tags", "extended,withdeploy"]
+        env   = ["CGO_ENABLED=1"]
+
+    [[builds.os]]
+        goos = "darwin"
+        [builds.os.build_settings]
+            env = ["CGO_ENABLED=1", "CC=o64-clang", "CXX=o64-clang++"]
+        [[builds.os.archs]]
+            goarch = "universal"
+    [[builds.os]]
+        goos = "linux"
+        [[builds.os.archs]]
+            goarch = "amd64"
+
+[[builds]]
     path = "container2/linux/extended"
 
     [builds.build_settings]
         flags = ["-buildmode", "exe", "-tags", "extended"]
+
+    [[builds.os]]
+        goos = "linux"
+        [builds.os.build_settings]
+            env = [
+                "CGO_ENABLED=1",
+                "CC=aarch64-linux-gnu-gcc",
+                "CXX=aarch64-linux-gnu-g++",
+            ]
+        [[builds.os.archs]]
+            goarch = "arm64"
+
+[[builds]]
+    path = "container2/linux/extended-withdeploy"
+
+    [builds.build_settings]
+        flags = ["-buildmode", "exe", "-tags", "extended,withdeploy"]
 
     [[builds.os]]
         goos = "linux"
@@ -163,6 +202,25 @@ archive_alias_replacements = { "linux-amd64.tar.gz" = "Linux-64bit.tar.gz" }
         [[builds.os.archs]]
             goarch = "amd64"
 
+[[builds]]
+    path = "container1/windows/extended-withdeploy"
+
+    [builds.build_settings]
+        flags = ["-buildmode", "exe", "-tags", "extended,withdeploy"]
+        env = [
+            "CGO_ENABLED=1",
+            "CC=x86_64-w64-mingw32-gcc",
+            "CXX=x86_64-w64-mingw32-g++",
+        ]
+        ldflags = "-s -w -X github.com/gohugoio/hugo/common/hugo.vendorInfo=gohugoio -extldflags '-static'"
+
+    [[builds.os]]
+        goos = "windows"
+        [builds.os.build_settings]
+            binary = "hugo.exe"
+        [[builds.os.archs]]
+            goarch = "amd64"
+
 [[archives]]
     paths = ["builds/container1/unix/regular/**"]
 [[archives]]
@@ -170,10 +228,17 @@ archive_alias_replacements = { "linux-amd64.tar.gz" = "Linux-64bit.tar.gz" }
     [archives.archive_settings]
         name_template = "{{ .Project }}_extended_{{ .Tag | trimPrefix `v` }}_{{ .Goos }}-{{ .Goarch }}"
 [[archives]]
-    # Only extended builds in container2.
-    paths = ["builds/container2/**"]
+    paths = ["builds/container1/unix/extended-withdeploy/**"]
+    [archives.archive_settings]
+        name_template = "{{ .Project }}_extended_withdeploy_{{ .Tag | trimPrefix `v` }}_{{ .Goos }}-{{ .Goarch }}"
+[[archives]]
+    paths = ["builds/container2/*/extended/**"]
     [archives.archive_settings]
         name_template = "{{ .Project }}_extended_{{ .Tag | trimPrefix `v` }}_{{ .Goos }}-{{ .Goarch }}"
+[[archives]]
+    paths = ["builds/container2/*/extended-withdeploy/**"]
+    [archives.archive_settings]
+        name_template = "{{ .Project }}_extended_withdeploy_{{ .Tag | trimPrefix `v` }}_{{ .Goos }}-{{ .Goarch }}"
 [[archives]]
     paths = ["builds/**/windows/regular/**"]
     [archives.archive_settings.type]
@@ -183,6 +248,13 @@ archive_alias_replacements = { "linux-amd64.tar.gz" = "Linux-64bit.tar.gz" }
     paths = ["builds/**/windows/extended/**"]
     [archives.archive_settings]
         name_template = "{{ .Project }}_extended_{{ .Tag | trimPrefix `v` }}_{{ .Goos }}-{{ .Goarch }}"
+        [archives.archive_settings.type]
+            format    = "zip"
+            extension = ".zip"
+[[archives]]
+    paths = ["builds/**/windows/extended-withdeploy/**"]
+    [archives.archive_settings]
+        name_template = "{{ .Project }}_extended_withdeploy_{{ .Tag | trimPrefix `v` }}_{{ .Goos }}-{{ .Goarch }}"
         [archives.archive_settings.type]
             format    = "zip"
             extension = ".zip"
@@ -200,9 +272,9 @@ archive_alias_replacements = { "linux-amd64.tar.gz" = "Linux-64bit.tar.gz" }
             command = "github.com/gohugoio/hugoreleaser-archive-plugins/deb@v0.6.1"
         [archives.archive_settings.custom_settings]
             vendor      = "gohugo.io"
-            homepage    = "https://github.com/gohugoio/hugoreleaser"
+            homepage    = "https://github.com/gohugoio/hugo"
             maintainer  = "Bjørn Erik Pedersen <bjorn.erik.pedersen@gmail.com>"
-            description = "Build, archive and release Go programs."
+            description = "A fast and flexible Static Site Generator written in Go."
             license     = "Apache-2.0"
 [[archives]]
     paths = ["builds/**/extended/linux/{arm64,amd64}"]
@@ -219,9 +291,9 @@ archive_alias_replacements = { "linux-amd64.tar.gz" = "Linux-64bit.tar.gz" }
             command = "github.com/gohugoio/hugoreleaser-archive-plugins/deb@latest"
         [archives.archive_settings.custom_settings]
             vendor      = "gohugo.io"
-            homepage    = "https://github.com/gohugoio/hugoreleaser"
+            homepage    = "https://github.com/gohugoio/hugo"
             maintainer  = "Bjørn Erik Pedersen <bjorn.erik.pedersen@gmail.com>"
-            description = "Build, archive and release Go programs."
+            description = "A fast and flexible Static Site Generator written in Go."
             license     = "Apache-2.0"
 
 [[releases]]

@@ -110,7 +110,7 @@ title: "Shortcodes Galore!"
 
 			p, err := pageparser.ParseMain(strings.NewReader(test.input), pageparser.Config{})
 			c.Assert(err, qt.IsNil)
-			handler := newShortcodeHandler(nil, s)
+			handler := newShortcodeHandler("", s)
 			iter := p.Iterator()
 
 			short, err := handler.extractShortcode(0, 0, p.Input(), iter)
@@ -126,9 +126,10 @@ func TestShortcodeMultipleOutputFormats(t *testing.T) {
 	siteConfig := `
 baseURL = "http://example.com/blog"
 
-paginate = 1
-
 disableKinds = ["section", "term", "taxonomy", "RSS", "sitemap", "robotsTXT", "404"]
+
+[pagination]
+pagerSize = 1
 
 [outputs]
 home = [ "HTML", "AMP", "Calendar" ]
@@ -186,7 +187,7 @@ CSV: {{< myShort >}}
 	b.Assert(len(h.Sites), qt.Equals, 1)
 
 	s := h.Sites[0]
-	home := s.getPage(kinds.KindHome)
+	home := s.getPageOldVersion(kinds.KindHome)
 	b.Assert(home, qt.Not(qt.IsNil))
 	b.Assert(len(home.OutputFormats()), qt.Equals, 3)
 
@@ -756,12 +757,15 @@ title: "Hugo Rocks!"
 
 func TestShortcodeParams(t *testing.T) {
 	t.Parallel()
-	c := qt.New(t)
 
-	builder := newTestSitesBuilder(t).WithSimpleConfigFile()
-
-	builder.WithContent("page.md", `---
+	files := `
+-- hugo.toml --
+baseURL = "https://example.org"
+-- layouts/shortcodes/hello.html --
+{{ range $i, $v := .Params }}{{ printf "- %v: %v (%T) " $i $v $v -}}{{ end }}
+-- content/page.md --
 title: "Hugo Rocks!"
+summary: "Foo"
 ---
 
 # doc
@@ -770,23 +774,15 @@ types positional: {{< hello true false 33 3.14 >}}
 types named: {{< hello b1=true b2=false i1=33 f1=3.14 >}}
 types string: {{< hello "true" trues "33" "3.14" >}}
 escaped quoute: {{< hello "hello \"world\"." >}}
+-- layouts/_default/single.html --
+Content: {{ .Content }}|
+`
 
+	b := Test(t, files)
 
-`).WithTemplatesAdded(
-		"layouts/shortcodes/hello.html",
-		`{{ range $i, $v := .Params }}
--  {{ printf "%v: %v (%T)" $i $v $v }}
-{{ end }}
-{{ $b1 := .Get "b1" }}
-Get: {{ printf "%v (%T)" $b1 $b1 | safeHTML }}
-`).Build(BuildCfg{})
-
-	s := builder.H.Sites[0]
-	c.Assert(len(s.RegularPages()), qt.Equals, 1)
-
-	builder.AssertFileContent("public/page/index.html",
+	b.AssertFileContent("public/page/index.html",
 		"types positional: - 0: true (bool) - 1: false (bool) - 2: 33 (int) - 3: 3.14 (float64)",
-		"types named: - b1: true (bool) - b2: false (bool) - f1: 3.14 (float64) - i1: 33 (int) Get: true (bool) ",
+		"types named: - b1: true (bool) - b2: false (bool) - f1: 3.14 (float64) - i1: 33 (int)",
 		"types string: - 0: true (string) - 1: trues (string) - 2: 33 (string) - 3: 3.14 (string) ",
 		"hello &#34;world&#34;. (string)",
 	)
@@ -829,7 +825,6 @@ title: "Hugo Rocks!"
 <h2 id="doc">Doc</h2>
 `,
 	)
-
 }
 
 // https://github.com/gohugoio/hugo/issues/6857
@@ -917,17 +912,11 @@ title: "p1"
 {{ .Content }}
 `
 
-	b := NewIntegrationTestBuilder(
-		IntegrationTestConfig{
-			T:           t,
-			TxtarString: files,
-		},
-	).Build()
+	b := Test(t, files)
 
 	b.AssertFileContent("public/p1/index.html", `
 <x
 	`)
-
 }
 
 func TestShortcodePreserveIndentation(t *testing.T) {
@@ -959,15 +948,9 @@ title: "p1"
 {{ .Content }}
 `
 
-	b := NewIntegrationTestBuilder(
-		IntegrationTestConfig{
-			T:           t,
-			TxtarString: files,
-		},
-	).Build()
+	b := Test(t, files)
 
 	b.AssertFileContent("public/p1/index.html", "<ol>\n<li>\n<p>List 1</p>\n<ol>\n<li>Item Mark1 1</li>\n<li>Item Mark1 2</li>\n<li>Item Mark2 1</li>\n<li>Item Mark2 2\n<ol>\n<li>Item Mark2 2-1</li>\n</ol>\n</li>\n<li>Item Mark2 3</li>\n</ol>\n</li>\n</ol>")
-
 }
 
 func TestShortcodeCodeblockIndent(t *testing.T) {
@@ -990,15 +973,9 @@ echo "foo";
 {{ .Content }}
 `
 
-	b := NewIntegrationTestBuilder(
-		IntegrationTestConfig{
-			T:           t,
-			TxtarString: files,
-		},
-	).Build()
+	b := Test(t, files)
 
 	b.AssertFileContent("public/p1/index.html", "<pre><code>echo &quot;foo&quot;;\n</code></pre>")
-
 }
 
 func TestShortcodeHighlightDeindent(t *testing.T) {
@@ -1027,12 +1004,7 @@ title: "p1"
 {{ .Content }}
 `
 
-	b := NewIntegrationTestBuilder(
-		IntegrationTestConfig{
-			T:           t,
-			TxtarString: files,
-		},
-	).Build()
+	b := Test(t, files)
 
 	b.AssertFileContent("public/p1/index.html", `
 <pre><code> <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">line 1<span class="p">;</span>
@@ -1041,7 +1013,6 @@ title: "p1"
 </code></pre>
 
 	`)
-
 }
 
 // Issue 10236.
@@ -1073,7 +1044,6 @@ Title: {{ .Get "title" | safeHTML }}
 	).Build()
 
 	b.AssertFileContent("public/p1/index.html", `Title: Steve "Francia".`)
-
 }
 
 // Issue 10391.
@@ -1166,7 +1136,6 @@ C'est un test
 	).Build()
 
 	b.AssertFileContent("public/fr/p2/index.html", `plus-dinformations`)
-
 }
 
 // Issue 10671.
@@ -1281,5 +1250,4 @@ Hello.
 	).Build()
 
 	b.AssertFileContent("public/p1/index.html", "<span style=\"color:#a6e22e\">Hello.</span>")
-
 }

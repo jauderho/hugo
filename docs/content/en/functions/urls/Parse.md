@@ -1,16 +1,13 @@
 ---
 title: urls.Parse
 description: Parses a URL into a URL structure.
-categories: [functions]
+categories: []
 keywords: []
-menu:
-  docs:
-    parent: functions
-function:
+action:
   aliases: []
-  returnType: URL
+  related: []
+  returnType: url.URL
   signatures: [urls.Parse URL]
-relatedFunctions: []
 aliases: [/functions/urls.parse]
 ---
 
@@ -18,11 +15,11 @@ The `urls.Parse` function parses a URL into a [URL structure](https://godoc.org/
 
 [scheme]: https://www.iana.org/assignments/uri-schemes/uri-schemes.xhtml#uri-schemes-1
 
-
 ```go-html-template
 {{ $url := "https://example.org:123/foo?a=6&b=7#bar" }}
 {{ $u := urls.Parse $url }}
 
+{{ $u.String }} → https://example.org:123/foo?a=6&b=7#bar
 {{ $u.IsAbs }} → true
 {{ $u.Scheme }} → https
 {{ $u.Host }} → example.org:123

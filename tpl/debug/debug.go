@@ -15,26 +15,24 @@
 package debug
 
 import (
+	"encoding/json"
 	"sort"
 	"sync"
 	"time"
 
 	"github.com/bep/logg"
-	"github.com/sanity-io/litter"
 	"github.com/spf13/cast"
 	"github.com/yuin/goldmark/util"
 
+	"github.com/gohugoio/hugo/common/hugo"
 	"github.com/gohugoio/hugo/deps"
 )
 
 // New returns a new instance of the debug-namespaced template functions.
 func New(d *deps.Deps) *Namespace {
-	var timers map[string][]*timer
+	ns := &Namespace{}
 	if d.Log.Level() <= logg.LevelInfo {
-		timers = make(map[string][]*timer)
-	}
-	ns := &Namespace{
-		timers: timers,
+		ns.timers = make(map[string][]*timer)
 	}
 
 	if ns.timers == nil {
@@ -43,7 +41,7 @@ func New(d *deps.Deps) *Namespace {
 
 	l := d.Log.InfoCommand("timer")
 
-	d.BuildEndListeners.Add(func() {
+	d.BuildEndListeners.Add(func(...any) bool {
 		type data struct {
 			Name     string
 			Count    int
@@ -54,7 +52,7 @@ func New(d *deps.Deps) *Namespace {
 
 		var timersSorted []data
 
-		for k, v := range timers {
+		for k, v := range ns.timers {
 			var total time.Duration
 			var median time.Duration
 			sort.Slice(v, func(i, j int) bool {
@@ -86,6 +84,8 @@ func New(d *deps.Deps) *Namespace {
 		}
 
 		ns.timers = make(map[string][]*timer)
+
+		return false
 	})
 
 	return ns
@@ -107,7 +107,11 @@ type Namespace struct {
 // Also note that the output from Dump may change from Hugo version to the next,
 // so don't depend on a specific output.
 func (ns *Namespace) Dump(val any) string {
-	return litter.Sdump(val)
+	b, err := json.MarshalIndent(val, "", "  ")
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }
 
 // VisualizeSpaces returns a string with spaces replaced by a visible string.
@@ -154,5 +158,28 @@ func (t *timer) Stop() string {
 		t.elapsed = time.Since(t.start)
 	})
 	// This is used in templates, we need to return something.
+	return ""
+}
+
+// Internal template func, used in tests only.
+func (ns *Namespace) TestDeprecationInfo(item, alternative string) string {
+	v := hugo.CurrentVersion
+	hugo.Deprecate(item, alternative, v.String())
+	return ""
+}
+
+// Internal template func, used in tests only.
+func (ns *Namespace) TestDeprecationWarn(item, alternative string) string {
+	v := hugo.CurrentVersion
+	v.Minor -= 6
+	hugo.Deprecate(item, alternative, v.String())
+	return ""
+}
+
+// Internal template func, used in tests only.
+func (ns *Namespace) TestDeprecationErr(item, alternative string) string {
+	v := hugo.CurrentVersion
+	v.Minor -= 12
+	hugo.Deprecate(item, alternative, v.String())
 	return ""
 }
