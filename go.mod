@@ -75,11 +75,11 @@ require (
 	go.uber.org/automaxprocs v1.5.3
 	gocloud.dev v0.39.0
 	golang.org/x/exp v0.0.0-20221031165847-c99f073a8326
-	golang.org/x/image v0.22.0
+	golang.org/x/image v0.26.0
 	golang.org/x/mod v0.22.0
 	golang.org/x/net v0.32.0
-	golang.org/x/sync v0.10.0
-	golang.org/x/text v0.21.0
+	golang.org/x/sync v0.13.0
+	golang.org/x/text v0.24.0
 	golang.org/x/tools v0.28.0
 	google.golang.org/api v0.206.0
 	gopkg.in/yaml.v2 v2.4.0
@@ -169,3 +169,4 @@ require (
 )
 
 go 1.22.6
+toolchain go1.24.1
